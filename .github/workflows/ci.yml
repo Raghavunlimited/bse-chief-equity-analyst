@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Methodology + platform tests
+        env:
+          AUTH_ENABLED: "true"
+          SECRET_KEY: ci-test-secret-key-32chars-min!!
+          ALLOW_DEMO_DATA: "true"
+          MARKET_DATA_ADAPTER: demo
+        run: |
+          python -c "from app.signals.methodology import score_evidence; assert score_evidence({})['direction']=='none'"
+          python test_methodology.py
+          python test_crypto_adapters.py
+          python test_mvp_platform.py
+          python test_analyze_validation.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install
+        run: npm install --legacy-peer-deps
+      - name: Test
+        env:
+          CI: "true"
+        run: npm test -- --watchAll=false
+      - name: Build
+        run: npm run build

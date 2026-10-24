@@ -1,211 +1,100 @@
-# BSE Chief Equity Analyst - Weekly Swing Trader
+# Swing Desk
 
-A comprehensive, institutional-grade equity analysis and swing trading platform for NSE/BSE stocks. Features algorithmic **BSE Chief Equity Analyst** reports that synthesize technicals, fundamentals, news, and sector rotation into research-grade investment decisions.
+Customer-facing research & signals MVP (**v4.0**): auth/RBAC, auditable signals, encrypted LLM vault, demo-labeled market adapter. See [QUICKSTART.md](QUICKSTART.md) and [docs/DELIVERY_REPORT.md](docs/DELIVERY_REPORT.md).
 
-## 🚀 Key Features
+NSE weekly swing setups on **liquid NSE cash equities** (not the full BSE/NSE board): momentum breakouts with volume confirmation, relative strength vs NIFTY, and a market-regime gate. When conditions are weak, the desk stays in cash and shows a momentum radar instead.
 
-### **BSE Chief Equity Analyst Reports**
-- **Unified Analysis**: Combines technicals + fundamentals + news + sector rotation
-- **Structured Output**: Executive summary, 0-10 scorecard, bull/base/bear scenarios
-- **Classification**: `LONG-TERM` / `SHORT-TERM` / `AVOID` with detailed reasoning
-- **Trading Plans**: Entry/stop/targets with invalidation levels ("what proves thesis wrong")
-- **Risk Assessment**: Earnings quality, governance scoring, red flag detection
+Default refresh pulls up to **500** NSE EQ names via **concurrent Kotak** workers (`MAX_INGEST_SYMBOLS`, `INGEST_WORKERS=6`). Browse covers ~2,500 listed NSE EQ names; ETFs/illiquids are excluded from the swing scan by design.
 
-### **Elite Momentum Screener (68% Win Rate)**
-- **Market Regime Filter**: Only trades when NIFTY above SMA20 & SMA50
-- **Relative Strength**: Stocks must outperform NIFTY by 3%+
-- **Volume Climax**: 2x+ volume surge with institutional confirmation
-- **Quality Gate**: Filters junk stocks with technical quality checks
-- **Dynamic Exits**: ATR-based targets with time decay stops
+## Strategy (shared by live picks and backtest)
 
-### **Multi-Source Real News Analysis**
-- **Live Data**: RSS feeds (MoneyControl, ET Markets, LiveMint) + Google News + Yahoo Finance
-- **SEBI LODR Classification**: Regulation 30/31/33 categorization
-- **Price Sensitive Information (PSI)**: Auto-detection and materiality scoring
-- **Sentiment Analysis**: 200+ bullish/bearish patterns with confidence scoring
-- **Corporate Governance**: Red flags for insider trading, management changes, fraud
+1. **Regime** — NIFTY close above SMA20 and SMA50; otherwise no new entries  
+2. **Universe** — EQ names, price ≥ ₹100, day turnover ≥ ₹10 Cr  
+3. **Setup** — Near 20-day high, above SMA20/50, RSI 45–75, 3-day ROC > 0  
+4. **Confirm** — Volume ≥ 2× 20-day average and rising vs prior day  
+5. **RS** — Stock 20-day return − NIFTY 20-day ≥ +3%  
+6. **Select** — Score ≥ 65; top 2 only  
+7. **Risk** — Stop = tighter of 1.2×ATR / 3%; target = higher of 2×ATR / 6%; max hold 5 sessions  
 
-### **Comprehensive Fundamental Analysis**
-- **Financial Scoring**: 100-point system (profitability/debt/growth/valuation/dividend)
-- **Earnings Quality**: Cash conversion, accrual ratio, revenue consistency (Grade A-D)
-- **Governance Scoring**: Promoter holding, institutional confidence, stability (Grade A-D)
-- **Yahoo Finance Integration**: 5+ years financials, balance sheet, cash flow
+Live screening and backtest call the same `generate_weekly_picks` function.
 
-### **Sector Rotation Intelligence**
-- **Index Comparison**: Sector indices vs NIFTY 50 relative strength (1M/3M/6M)
-- **Regime Classification**: `LEADING` / `WEAKENING` / `LAGGING` / `IMPROVING`
-- **Rotation Signals**: Best/worst performing sectors with momentum analysis
-- **Seasonality**: Month-wise sector performance patterns
+## Stack
 
-### **Backtested Strategy Performance**
-- **150 Weeks**: 2.9 years of historical validation
-- **282 Trades**: Comprehensive sample size
-- **68.4% Win Rate**: Institutional-grade performance
-- **25.1% Annual Returns**: Risk-adjusted outperformance
-- **1.45 Profit Factor**: Consistent edge validation
+- **Backend:** Python, FastAPI, SQLite (NSE bhavcopy EOD + Yahoo NIFTY series)  
+- **Frontend:** React (CRA), Recharts  
 
-## 🏗 Technology Stack
-
-### Backend
-- **Python 3.11+** with FastAPI
-- **SQLite** for EOD/indicators storage
-- **pandas/numpy** for data processing
-- **yfinance** for fundamentals
-- **Multi-source APIs**: NSE, BSE, RSS feeds, Google News
-
-### Frontend
-- **React 18** with modern hooks
-- **Tabbed Interface**: Trade Setup / Scorecard / Analysis / Scenarios
-- **Real-time Updates**: Auto-refresh news and data
-- **Responsive Design**: Mobile-optimized UI
-
-### Data Sources
-- **NSE**: Official bhavcopy archives, corporate announcements
-- **Yahoo Finance**: Fundamentals, financials, news
-- **RSS Feeds**: MoneyControl, Economic Times, LiveMint
-- **Google News**: Per-symbol news search
-- **BSE**: Corporate filings XML
-
-## 📊 Weekly Picks Methodology
-
-**Elite Momentum Strategy v2.0** (Institutional Grade):
-
-1. **Market Regime Check**: NIFTY above SMA20 & SMA50 (avoids bear market losses)
-2. **Elite Screening**: 100-point scoring (breakout 35 + volume 25 + momentum 25 + trend 15)
-3. **Quality Filter**: Remove junk stocks (technical quality checks)
-4. **Relative Strength**: Outperform NIFTY by 3%+ over 20 days
-5. **Volume Confirmation**: 2x+ volume surge (institutional activity)
-6. **Chief Analyst Report**: Full research report for each pick
-
-**Output**: Exactly 2 stocks weekly with:
-- Executive summary and classification tag
-- 0-10 scorecard (Long-Term/Short-Term/Risk/Valuation/Quality)
-- Bull/Base/Bear scenarios with 3-year price targets
-- 8 key catalysts + 8 key risks
-- Trading plan with invalidation levels
-
-## 🚀 Quick Start
+## Quick start
 
 ```bash
-# Clone and start
-git clone <repository>
-cd weekly_swing
+cd bse-chief-equity-analyst
 ./start.sh
+```
 
-# Or manual setup:
+- UI: http://localhost:3000  
+- API docs: http://localhost:8000/docs  
+
+Manual:
+
+```bash
 # Backend
 cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --port 8000
+cp .env.example .env   # optional
+python run_daily_ingest.py
+uvicorn app.main:app --reload --port 8000
 
-# Frontend
+# Frontend (other terminal)
 cd frontend
 npm install
 npm start
 ```
 
-**Access**: http://localhost:3000
+## Data
 
-## 📡 API Endpoints
+Priority order on **Refresh**:
 
-### **Chief Analyst**
-- `GET /api/analyst/report/{symbol}` - Full BSE Chief Equity Analyst report
-- `GET /api/analyst/sector-rotation/{sector}` - Sector vs NIFTY relative strength
+1. **NSE** CM-UDiFF bhavcopy (when reachable)  
+2. **Kotak Neo** (if `KOTAK_CONSUMER_KEY` set — historical needs only the consumer token)  
+3. **Yahoo** chart API (works, but rate-limits hard)  
 
-### **Weekly Picks**
-- `GET /api/weekly-swing-picks` - Top 2 stocks with analyst reports
-- `GET /api/screener/elite` - Elite momentum screening
+Demo seed is synthetic only — UI shows a **DEMO** badge until live ingest succeeds.
 
-### **News & Events**
-- `GET /api/news/latest` - Multi-source news with SEBI analysis
-- `GET /api/news/symbol/{symbol}` - Stock-specific news
-- `GET /api/news/signals` - High-confidence trading signals
+### Kotak Neo setup (primary live EOD)
 
-### **Fundamentals**
-- `GET /api/stock/{symbol}/financials` - Complete financial analysis
-- `GET /api/multibagger` - Long-term wealth creation candidates
+1. Open **Kotak Neo** app/web → **More** → **Trade API** → Create Application  
+2. Copy the consumer token into `backend/.env`:
 
-### **Data Management**
-- `POST /api/ingest/latest` - Fetch latest NSE data
-- `GET /api/stats/overview` - Database statistics
+```bash
+KOTAK_CONSUMER_KEY=your_token_here
+```
 
-## 📈 Scoring Systems
+3. Save, click **Test Kotak**, then **Force full**  
+4. No TOTP/MPIN needed for historical candles (orders would need them later)
 
-### **Elite Momentum Score (0-100)**
-- **Breakout (35)**: Position relative to 20-day high
-- **Volume (25)**: Volume surge vs 20-day average  
-- **Momentum (25)**: RSI + price vs moving averages
-- **Trend (15)**: SMA alignment and structure
+```bash
+cd backend && source venv/bin/activate
+python run_daily_ingest.py   # live NSE/Yahoo (may rate-limit)
+# If live ingest is empty, seed demo history for local UI/backtest:
+python seed_demo_data.py
+python run_backtest.py
+```
 
-### **Chief Analyst Scorecard (0-10 each)**
-- **Long-Term**: Fundamentals-driven (ROE, growth, earnings quality, governance)
-- **Short-Term**: Technicals-driven (trend, momentum, volume, news sentiment)
-- **Risk**: Lower = riskier (debt, volatility, liquidity, governance flags)
-- **Valuation**: PE, PEG, PB relative to industry and growth
-- **Quality**: Financial score + earnings quality + governance grades
+## API
 
-### **Financial Score (0-100)**
-- **Profitability (25)**: ROE 15%+, margins, efficiency
-- **Debt Health (20)**: D/E <0.5, liquidity ratios
-- **Growth (20)**: Revenue/earnings CAGR
-- **Valuation (15)**: PE vs industry, PEG ratio
-- **Promoter Confidence (10)**: Insider holding 50%+
-- **Dividend (10)**: Yield + payout sustainability
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/ingest/latest` | Fill EOD gap + NIFTY + indicators |
+| GET | `/api/weekly-picks` | This week’s setups (or cash) |
+| POST | `/api/backtest` | Week-based backtest (costs/gaps) |
+| GET | `/api/market-regime` | NIFTY regime |
+| GET | `/api/stats` | DB / freshness |
+| GET | `/api/stocks` | Browse / search full NSE EQ list |
+| GET | `/api/stock/{symbol}` | Detail + Screener financials |
+| GET | `/api/chart/{symbol}` | OHLCV |
+| GET | `/api/feeds/kotak` | Kotak feed status |
 
-## 🎯 Classification Rules
+## Risk
 
-### **LONG-TERM** (2-5 year holding)
-- Quality + fundamentals + governance + reasonable valuation
-- ROE >15%, earnings quality Grade A/B, low debt
-- Suitable for SIP investing, wealth creation
-
-### **SHORT-TERM** (1-12 weeks swing)  
-- Trend + momentum + catalysts + risk-reward
-- Technical setup + volume confirmation + news support
-- Tight risk management, 2% capital risk per trade
-
-### **AVOID**
-- Red flags dominate: weak balance sheet, earnings quality issues
-- Governance concerns: high promoter pledge, audit issues
-- Broken technical structure or adverse macro environment
-
-## 🔬 Data Quality & Assumptions
-
-**Strengths**:
-- Multi-source data validation (NSE + Yahoo + RSS feeds)
-- 10+ years price/volume history potential
-- Real-time news from 6+ sources (105+ items per fetch)
-- SEBI LODR compliance categorization
-
-**Limitations**:
-- Fundamental data delayed (quarterly reporting)
-- Small-cap liquidity assumptions may not hold
-- News sentiment is algorithmic (not human analyst)
-- Past performance doesn't guarantee future results
-
-## 📋 Risk Warnings
-
-⚠️ **Always use stop-losses** - No exceptions, 1-3% max per trade  
-⚠️ **Position sizing** - Never risk >2% of capital per trade  
-⚠️ **Diversification** - Max 10% in any single stock  
-⚠️ **Market regime** - Avoid new entries in bear markets  
-⚠️ **Fundamental changes** - Exit if thesis invalidation triggers hit
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature-name`
-3. Follow existing code style and patterns
-4. Add comprehensive tests for new features
-5. Update documentation and API docs
-6. Submit pull request with detailed description
-
-## 📄 License
-
-This project is licensed under the MIT License - see LICENSE file for details.
-
----
-
-**Disclaimer**: This is algorithmic analysis for educational purposes, not financial advice. Always conduct your own research and consult qualified financial advisors before making investment decisions. Past performance does not guarantee future results.
+This is for research and education, not advice. Markets gap; stops can slip. Size risk per trade (default 2% of capital) and never skip the stop. Past backtest results do not guarantee future returns.
