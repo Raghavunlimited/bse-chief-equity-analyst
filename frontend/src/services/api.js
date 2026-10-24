@@ -1,291 +1,174 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const SESSION_KEY = 'swing_desk_session';
+
+export function getSessionToken() {
+  try {
+    return localStorage.getItem(SESSION_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setSessionToken(token) {
+  try {
+    if (token) localStorage.setItem(SESSION_KEY, token);
+    else localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearSession() {
+  setSessionToken('');
+}
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseURL: '',
+  timeout: 90000,
 });
 
-export const screenerAPI = {
-  // Get latest screener results
-  getLatestResults: async (limit = 20) => {
-    const response = await api.get(`/api/screener/latest?limit=${limit}`);
-    return response.data;
-  },
+api.interceptors.request.use((config) => {
+  const token = getSessionToken();
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers['X-Session-Token'] = token;
+    // Session auth uses Bearer; do not overwrite with LLM keys
+    if (!config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
 
-  // Get screener results for a specific date
-  getResultsByDate: async (date, limit = 20) => {
-    const response = await api.get(`/api/screener/by-date?date=${date}&limit=${limit}`);
-    return response.data;
-  },
+/** Prefer consultant desk; fall back to legacy tape on 404/network miss. */
+async function consultantOrFallback(consultantPath, fallbackFn) {
+  try {
+    const res = await api.get(consultantPath);
+    return { ...res, data: { ...res.data, _source: 'consultant' } };
+  } catch (e) {
+    const status = e.response?.status;
+    if (status && status !== 404 && status < 500) throw e;
+    const res = await fallbackFn();
+    return { ...res, data: { ...res.data, _source: 'legacy' } };
+  }
+}
 
-  // Get available screening dates
-  getAvailableDates: async () => {
-    const response = await api.get('/api/available-dates');
-    return response.data;
-  },
+export const deskAPI = {
+  health: () => api.get('/api/health'),
+  authStatus: () => api.get('/api/auth/status'),
+  login: (body) => api.post('/api/auth/login', body),
+  register: (body) => api.post('/api/auth/register', body),
+  logout: () => api.post('/api/auth/logout'),
+  me: () => api.get('/api/auth/me'),
 
-  // Run screener now
-  runScreener: async (topN = 20, capitalPerTrade = 100000) => {
-    const response = await api.post('/api/screener/run', null, {
-      params: { top_n: topN, capital_per_trade: capitalPerTrade }
-    });
-    return response.data;
-  },
+  platformDisclosure: () => api.get('/api/platform/disclosure'),
+  platformSignals: ({ category, history = false, limit = 100, symbol } = {}) =>
+    api.get('/api/platform/signals', {
+      params: { category, history, limit, symbol },
+    }),
+  platformDemoSignals: () => api.get('/api/platform/demo/signals'),
+  platformInstruments: (category) =>
+    api.get('/api/platform/instruments', { params: { category } }),
+  marketQuote: (symbol, category = 'swing') =>
+    api.get(`/api/platform/market/${symbol}/quote`, { params: { category } }),
+  methodology: () => api.get('/api/methodology'),
 
-  // Ingest latest data
-  ingestLatest: async () => {
-    const response = await api.post('/api/ingest/latest');
-    return response.data;
-  },
+  llmVaultStatus: () => api.get('/api/me/llm'),
+  llmVaultPut: (body) => api.put('/api/me/llm', body),
+  llmVaultDelete: () => api.delete('/api/me/llm'),
 
-  // Ingest historical data
-  ingestHistorical: async (startDate, endDate) => {
-    const response = await api.post('/api/ingest/historical', null, {
-      params: { start_date: startDate, end_date: endDate }
-    });
-    return response.data;
-  },
+  adminInstruments: (category) =>
+    api.get('/api/admin/instruments', { params: { category } }),
+  adminUpsertInstrument: (body) => api.post('/api/admin/instruments', body),
+  adminPublishSignal: (body) => api.post('/api/admin/signals', body),
+  adminReviseSignal: (id, body) => api.post(`/api/admin/signals/${id}/revise`, body),
+  adminAudit: (limit = 100) => api.get('/api/admin/audit', { params: { limit } }),
 
-  // Run backtest
-  runBacktest: async (startDate, endDate, capital = 1000000, maxPositions = 10) => {
-    const response = await api.post('/api/backtest/run', {
-      start_date: startDate,
-      end_date: endDate,
-      capital,
-      max_positions: maxPositions
-    });
-    return response.data;
-  },
-
-  // Get stats
-  getStats: async () => {
-    const response = await api.get('/api/stats/overview');
-    return response.data;
-  },
-
-  // Get stock details with pros/cons
-  getStockDetails: async (symbol) => {
-    const response = await api.get(`/api/stock/${symbol}`);
-    return response.data;
-  },
-
-  // Get chart data for a stock
-  getChartData: async (symbol, period = '3M') => {
-    const response = await api.get(`/api/chart/${symbol}?period=${period}`);
-    return response.data;
-  },
-
-  // Get score explanation
-  getScoreExplanation: async () => {
-    const response = await api.get('/api/score-explanation');
-    return response.data;
-  },
-
-  // Get sector analysis
-  getSectors: async () => {
-    const response = await api.get('/api/sectors');
-    return response.data;
-  },
-
-  // Get comprehensive sector rotation analysis
-  getSectorAnalysis: async () => {
-    const response = await api.get('/api/sector-analysis');
-    return response.data;
-  },
-
-  // Get stocks in a specific sector
-  getSectorStocks: async (sectorName, top_n = 5) => {
-    const response = await api.get(`/api/sector/${encodeURIComponent(sectorName)}/stocks?top_n=${top_n}`);
-    return response.data;
-  },
-
-  // Enhanced screener with all filters
-  runEnhancedScreener: async (params = {}) => {
-    const response = await api.post('/api/screener/enhanced', null, {
+  getStats: () => api.get('/api/stats'),
+  ingestLatest: (force = false) =>
+    api.post(`/api/ingest/latest?force=${force ? 'true' : 'false'}`),
+  getIngestProgress: () => api.get('/api/ingest/progress'),
+  ingestStatus: () => api.get('/api/ingest/status'),
+  kotakStatus: () => api.get('/api/feeds/kotak'),
+  testKotak: () => api.post('/api/feeds/kotak/test'),
+  getWeeklyPicks: ({
+    asOf,
+    capital,
+    risk_pct,
+    max_positions,
+    reserved_cash_pct,
+    entry_style,
+    target_gain_pct,
+  } = {}) =>
+    api.get('/api/weekly-picks', {
       params: {
-        top_n: params.top_n || 10,
-        capital_per_trade: params.capital_per_trade || 100000,
-        min_score: params.min_score || 12,
-        apply_market_filter: params.apply_market_filter !== false,
-        apply_sector_filter: params.apply_sector_filter !== false,
-        apply_sr_filter: params.apply_sr_filter !== false,
-        apply_mtf_filter: params.apply_mtf_filter !== false,
-        apply_fundamental_filter: params.apply_fundamental_filter !== false,
-        top_sectors: params.top_sectors || 3
-      }
-    });
-    return response.data;
+        ...(asOf ? { as_of: asOf } : {}),
+        ...(capital != null ? { capital } : {}),
+        ...(risk_pct != null ? { risk_pct } : {}),
+        ...(max_positions != null ? { max_positions } : {}),
+        ...(reserved_cash_pct != null ? { reserved_cash_pct } : {}),
+        ...(entry_style ? { entry_style } : {}),
+        ...(target_gain_pct != null ? { target_gain_pct } : {}),
+      },
+    }),
+  getMarketRegime: () => api.get('/api/market-regime'),
+  runBacktest: (body = {}) => api.post('/api/backtest', body),
+  getStock: (symbol) => api.get(`/api/stock/${symbol}`),
+  getChart: (symbol, days = 90) =>
+    api.get(`/api/chart/${symbol}`, { params: { days } }),
+  getFundamentals: (symbol, refresh = false) =>
+    api.get(`/api/stock/${symbol}/fundamentals`, { params: { refresh } }),
+  searchStocks: (q) => api.get('/api/stocks/search', { params: { q } }),
+  listStocks: ({ q = '', page = 1, page_size = 72, in_db_only = false } = {}) =>
+    api.get('/api/stocks', {
+      params: { q, page, page_size, in_db_only },
+    }),
+  getJournal: (week) =>
+    api.get('/api/journal', { params: week ? { week } : {} }),
+  saveJournal: (entry) => api.post('/api/journal', entry),
+  getIntradaySignals: (limit = 20) =>
+    api.get('/api/intraday/signals', { params: { limit } }),
+  getMcxSignals: () => api.get('/api/mcx/signals'),
+
+  getConsultantSwing: () => api.get('/api/consultant/swing'),
+  getConsultantIntraday: (limit = 20) =>
+    api.get('/api/consultant/intraday', { params: { limit } }),
+  getConsultantMcx: () => api.get('/api/consultant/mcx'),
+
+  getIntradayDesk: (limit = 20) =>
+    consultantOrFallback(`/api/consultant/intraday?limit=${limit}`, () =>
+      deskAPI.getIntradaySignals(limit),
+    ),
+  getMcxDesk: () =>
+    consultantOrFallback('/api/consultant/mcx', () => deskAPI.getMcxSignals()),
+  getSwingConsultant: async () => {
+    try {
+      const res = await api.get('/api/consultant/swing');
+      return { ...res, data: { ...res.data, _source: 'consultant' } };
+    } catch (e) {
+      if (e.response?.status === 404) return { data: null };
+      throw e;
+    }
   },
 
-  // Get market regime
-  getMarketRegime: async () => {
-    const response = await api.get('/api/market-regime');
-    return response.data;
-  },
-
-  // Get sector rotation analysis
-  getSectorRotation: async (topN = 3) => {
-    const response = await api.get(`/api/sector-rotation?top_n=${topN}`);
-    return response.data;
-  },
-
-  // Get filter summary
-  getFilterSummary: async () => {
-    const response = await api.get('/api/filters/summary');
-    return response.data;
-  },
-
-  // Get entry analysis for a stock
-  getEntryAnalysis: async (symbol) => {
-    const response = await api.get(`/api/stock/${symbol}/entry-analysis`);
-    return response.data;
-  },
-
-  // Get position size calculation
-  getPositionSize: async (symbol, capital = 100000) => {
-    const response = await api.get(`/api/position-size/${symbol}?capital=${capital}`);
-    return response.data;
-  },
-
-  // Get sector heatmap data with date range
-  getSectorHeatmap: async (startDate = null, endDate = null) => {
-    let url = '/api/sector-heatmap';
-    const params = [];
-    if (startDate) params.push(`start_date=${startDate}`);
-    if (endDate) params.push(`end_date=${endDate}`);
-    if (params.length > 0) url += '?' + params.join('&');
-    const response = await api.get(url);
-    return response.data;
-  },
-
-  // Ultimate Screener - Pattern Recognition + Trend + Sector Rotation
-  runUltimateScreener: async (params = {}) => {
-    const response = await api.post('/api/screener/ultimate', null, {
-      params: {
-        top_n: params.top_n || 20,
-        capital_per_trade: params.capital_per_trade || 100000,
-        min_score: params.min_score || 50,
-        require_pattern: params.require_pattern !== false,
-        require_trend: params.require_trend !== false,
-        sector_filter: params.sector_filter !== false,
-        max_risk_pct: params.max_risk_pct || 5.0
-      }
-    });
-    return response.data;
-  },
-
-  // Get ultimate screener methodology
-  getUltimateMethodology: async () => {
-    const response = await api.get('/api/screener/ultimate/methodology');
-    return response.data;
-  },
-
-  // Elite Momentum Screener - Backtested 68% win rate, 25% annual returns
-  runEliteScreener: async (params = {}) => {
-    const response = await api.post('/api/screener/elite', null, {
-      params: {
-        top_n: params.top_n || 2,
-        capital_per_trade: params.capital_per_trade || 100000,
-        min_score: params.min_score || 70,
-        min_price: params.min_price || 100
-      }
-    });
-    return response.data;
-  },
-
-  // Get elite screener methodology and backtest results
-  getEliteMethodology: async () => {
-    const response = await api.get('/api/screener/elite/methodology');
-    return response.data;
-  },
-
-  // Get pattern analysis for a stock
-  getStockPatterns: async (symbol) => {
-    const response = await api.get(`/api/stock/${symbol}/patterns`);
-    return response.data;
-  },
-
-  // Get sector performance across time periods (1d, 2d, 5d, 7d, 1m)
-  getSectorPerformance: async () => {
-    const response = await api.get('/api/sector-performance');
-    return response.data;
-  },
-
-  // Get detailed performance for a specific sector
-  getSectorDetailedPerformance: async (sectorName) => {
-    const response = await api.get(`/api/sector/${encodeURIComponent(sectorName)}/performance`);
-    return response.data;
-  },
-
-  // Start bulk historical data download (10 years)
-  startBulkDownload: async (years = 10) => {
-    const response = await api.post('/api/ingest/bulk', null, {
-      params: { years }
-    });
-    return response.data;
-  },
-
-  // Get bulk download status
-  getBulkDownloadStatus: async () => {
-    const response = await api.get('/api/ingest/bulk/status');
-    return response.data;
-  },
-
-  // Search stocks by symbol
-  searchStocks: async (query) => {
-    const response = await api.get(`/api/stocks/search?q=${encodeURIComponent(query)}`);
-    return response.data;
-  },
-
-  // Get comprehensive stock analysis with investment zones
-  getComprehensiveAnalysis: async (symbol, capital = 100000) => {
-    const response = await api.get(`/api/stock/${symbol}/comprehensive?capital=${capital}`);
-    return response.data;
-  },
-
-  // Get financial analysis (balance sheet, income statement, ratios)
-  getFinancialAnalysis: async (symbol) => {
-    const response = await api.get(`/api/stock/${symbol}/financials`);
-    return response.data;
-  },
-
-  // Get Chief Analyst report for a specific stock
-  getAnalystReport: async (symbol) => {
-    const response = await api.get(`/api/analyst/report/${symbol}`);
-    return response.data;
-  },
-
-  // Get sector rotation status
-  getSectorRotationStatus: async (sector) => {
-    const response = await api.get(`/api/analyst/sector-rotation/${encodeURIComponent(sector)}`);
-    return response.data;
-  },
-
-  // Get weekly swing picks (with analyst reports)
-  getWeeklySwingPicks: async () => {
-    const response = await api.get('/api/weekly-swing-picks');
-    return response.data;
-  },
-
-  // Get latest news
-  getLatestNews: async (forceRefresh = false, days = 3) => {
-    const response = await api.get(`/api/news/latest?force_refresh=${forceRefresh}&days=${days}`);
-    return response.data;
-  },
-
-  // Get news for a specific symbol
-  getNewsForSymbol: async (symbol) => {
-    const response = await api.get(`/api/news/symbol/${symbol}`);
-    return response.data;
-  },
-
-  // Get actionable news signals
-  getNewsSignals: async (minConfidence = 50) => {
-    const response = await api.get(`/api/news/signals?min_confidence=${minConfidence}`);
-    return response.data;
-  },
+  /**
+   * LLM analysis — prefers server vault (use_stored_key).
+   * Optional ephemeral apiKey in body only (never as Authorization — session uses that).
+   */
+  analyzeSignal: ({ provider, model, signal, context, apiKey, useStoredKey = true }) =>
+    api.post(
+      '/api/analyze',
+      {
+        provider,
+        ...(model ? { model } : {}),
+        signal,
+        ...(context ? { context } : {}),
+        ...(apiKey ? { api_key: apiKey } : {}),
+        use_stored_key: useStoredKey,
+      },
+      { timeout: 120000 },
+    ),
 };
+
+export default deskAPI;

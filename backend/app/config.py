@@ -1,43 +1,114 @@
-from pathlib import Path
+"""Application configuration — loads from environment / .env."""
+from __future__ import annotations
+
+import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).parent.parent
+load_dotenv(BASE_DIR / ".env")
+
 DATA_DIR = BASE_DIR / "data"
 RAW_DIR = DATA_DIR / "raw"
-PROCESSED_DIR = DATA_DIR / "processed"
 CACHE_DIR = BASE_DIR / "nse_cache"
-DB_PATH = DATA_DIR / "swing_trader.db"
+
+
+def _float(key: str, default: float) -> float:
+    return float(os.getenv(key, default))
+
+
+def _path(key: str, default: Path) -> Path:
+    raw = os.getenv(key)
+    if not raw:
+        return default
+    p = Path(raw)
+    return p if p.is_absolute() else BASE_DIR / p
+
 
 @dataclass
 class Config:
-    """Application configuration"""
-
-    # Data paths
     base_dir: Path = BASE_DIR
     data_dir: Path = DATA_DIR
     raw_dir: Path = RAW_DIR
-    processed_dir: Path = PROCESSED_DIR
     cache_dir: Path = CACHE_DIR
-    db_path: Path = DB_PATH
+    db_path: Path = _path("DATABASE_PATH", DATA_DIR / "swing_trader.db")
 
-    # Trading parameters
-    risk_per_trade: float = 0.02  # 2% risk per trade
-    min_traded_value: float = 10_00_00_000  # 10 Cr minimum avg traded value
-    min_price: float = 50.0  # Minimum stock price
+    # Risk / universe
+    risk_per_trade: float = _float("RISK_PER_TRADE", 0.02)
+    min_traded_value: float = _float("MIN_TRADED_VALUE", 10_00_00_000)  # 10 Cr
+    min_price: float = _float("MIN_PRICE", 100.0)
 
-    # Screener parameters
-    rsi_min: float = 55.0
-    rsi_max: float = 70.0
-    breakout_threshold: float = 0.98  # Within 2% of 20-day high
-    volume_multiplier: float = 1.5  # Volume > 1.5x average
+    # Strategy (elite_momentum pack)
+    min_score: float = _float("MIN_SCORE", 65.0)
+    volume_multiplier: float = _float("VOLUME_MULTIPLIER", 2.0)
+    rsi_min: float = _float("RSI_MIN", 45.0)
+    rsi_max: float = _float("RSI_MAX", 75.0)  # constructive momentum; >75 = overextended
+    rs_min_outperformance: float = _float("RS_MIN", 3.0)
+    top_n: int = int(os.getenv("TOP_N", "5"))
+    max_positions: int = int(os.getenv("MAX_POSITIONS", os.getenv("TOP_N", "5")))
+    entry_style: str = os.getenv("ENTRY_STYLE", "breakout")  # breakout | pullback
+    default_capital: float = _float("DEFAULT_CAPITAL", 100_000)
+    max_hold_days: int = int(os.getenv("MAX_HOLD_DAYS", "5"))
+    round_trip_cost: float = _float("ROUND_TRIP_COST", 0.0015)  # ~0.15%
 
-    # ATR-based targets
-    stop_loss_atr_multiple: float = 1.0
-    target_atr_multiple: float = 2.0
+    # Freshness: max age of latest EOD in calendar days before STALE
+    max_data_age_days: int = int(os.getenv("MAX_DATA_AGE_DAYS", "3"))
+
+    # Kotak EOD refresh size. 0 or negative = ALL NSE EQ cash names (~2.5k).
+    # Browse/search always cover the full listed EQ universe; this only caps candle ingest.
+    # Full ingest is slow (hours) — raise INGEST_WORKERS carefully (max 8).
+    max_ingest_symbols: int = int(os.getenv("MAX_INGEST_SYMBOLS", "0"))
+    ingest_pause_sec: float = _float("INGEST_PAUSE_SEC", 0.12)
+    # Parallel Kotak historical workers (hard-capped at 8 to avoid 429 storms)
+    ingest_workers: int = min(8, max(1, int(os.getenv("INGEST_WORKERS", "4"))))
+
+    # Production / readiness (see docs/CTO_READINESS.md)
+    cors_origins: str = os.getenv("CORS_ORIGINS", "")
+    api_key: str = os.getenv("API_KEY", "").strip()
+    allow_demo_data: bool = os.getenv("ALLOW_DEMO_DATA", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    enable_api_docs: bool = os.getenv("ENABLE_API_DOCS", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
+    ready_max_data_age_days: int = int(
+        os.getenv("READY_MAX_DATA_AGE_DAYS", os.getenv("MAX_DATA_AGE_DAYS", "3"))
+    )
+
+    # Customer platform auth (session tokens). Default on for MVP honesty.
+    auth_enabled: bool = os.getenv("AUTH_ENABLED", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    secret_key: str = os.getenv(
+        "SECRET_KEY", "dev-only-change-me-swing-desk-32c"
+    ).strip()
+    session_ttl_hours: int = int(os.getenv("SESSION_TTL_HOURS", "72"))
+    # demo | future live adapters
+    market_data_adapter: str = os.getenv("MARKET_DATA_ADAPTER", "demo").strip().lower()
+    # Jurisdiction label shown in disclosures (not a compliance claim)
+    jurisdiction_note: str = os.getenv(
+        "JURISDICTION_NOTE",
+        "Research tooling only. Not registered investment advice in any jurisdiction.",
+    )
+
+    def cors_origin_list(self) -> list[str]:
+        raw = (self.cors_origins or "").strip()
+        if not raw:
+            return ["*"]  # local default
+        return [o.strip() for o in raw.split(",") if o.strip()]
 
     def __post_init__(self):
-        """Create directories if they don't exist"""
-        for dir_path in [self.data_dir, self.raw_dir, self.processed_dir, self.cache_dir]:
+        for dir_path in [self.data_dir, self.raw_dir, self.cache_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
+
 
 config = Config()
