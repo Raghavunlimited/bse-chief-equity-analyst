@@ -3,7 +3,6 @@ import { deskAPI } from '../services/api';
 import {
   DEFAULT_MODEL_ID,
   LLM_MODELS,
-  findModel,
   resolveModelSelection,
 } from '../llmModels';
 import { LLM_MODEL_STORAGE, LLM_PROVIDER_STORAGE } from './SettingsDrawer';
@@ -43,8 +42,6 @@ export default function LlmAnalyzePanel({ signal, context, defaultOpen = false }
       .then((r) => setVaultOk(!!r.data?.configured))
       .catch(() => setVaultOk(false));
   }, [open]);
-
-  const selected = findModel(modelId);
 
   const run = async () => {
     if (!signal || typeof signal !== 'object') {
