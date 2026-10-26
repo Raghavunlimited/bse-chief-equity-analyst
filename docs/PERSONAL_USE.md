@@ -92,7 +92,27 @@ Freshness badges you may see: **LIVE**, **FALLBACK** (Yahoo — not broker live)
 |----------|-------------------|-----|
 | Kotak EOD / WS | `KOTAK_CONSUMER_KEY` (+ session/TOTP login when you want LIVE) in `backend/.env` | Test Kotak; never paste the key into the page |
 | Yahoo LTP fallback | `ALLOW_YAHOO_LTP_FALLBACK` (default on) | Shown as **FALLBACK**, never as Kotak LIVE |
-| LLM explain | Settings vault (encrypted on server) or one-shot key in the panel | Key cleared after send; not stored in frontend code |
+| Cloud LLM (OpenAI / Anthropic) | Settings vault or one-shot key in the Explain panel | Key cleared after send; never in frontend code or Git |
+| **Local LLM (Ollama / LM Studio)** | Run the server on this machine; set `LOCAL_LLM_BASE_URL` if needed | Pick a **Local ·** model in Explain / Settings — **no cloud API key** |
+
+### Local LLM quick start (Ollama)
+
+1. Install [Ollama](https://ollama.com) and start it (listens on `127.0.0.1:11434` by default).
+2. Pull a model, e.g. `ollama pull llama3.2`.
+3. In `backend/.env` (optional — these are the defaults):
+
+   ```bash
+   LOCAL_LLM_BASE_URL=http://127.0.0.1:11434/v1
+   LOCAL_LLM_DEFAULT_MODEL=llama3.2
+   ```
+
+4. Restart the API (`./start.sh` or uvicorn).
+5. On a research card, open **Explain with LLM**, choose **Local · Ollama/LM Studio · llama3.2** (or another Local entry / custom tag matching a model you pulled).
+6. Click **Explain card**. No OpenAI/Anthropic key is required.
+
+**LM Studio:** start its local server and set `LOCAL_LLM_BASE_URL=http://127.0.0.1:1234/v1` (typical), then use the model id LM Studio shows.
+
+**Safety:** the API only allows loopback hosts (`127.0.0.1` / `localhost`) for local LLM URLs — it will not call random remote hosts. Local LLM output is still **explain-only** commentary; it cannot create or change BUY/SELL/HOLD.
 
 Backup the SQLite DB occasionally: `./scripts/backup_sqlite.sh`.
 

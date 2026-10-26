@@ -1,6 +1,27 @@
-/** BYO LLM model catalog — ids must match backend allow-lists. */
+/** BYO LLM model catalog — cloud ids match backend allow-lists; local uses safe name pattern. */
 
 export const LLM_MODELS = [
+  {
+    id: 'local:llama3.2',
+    provider: 'local',
+    model: 'llama3.2',
+    label: 'Local · Ollama/LM Studio · llama3.2 (no cloud key)',
+    tier: 'local',
+  },
+  {
+    id: 'local:mistral',
+    provider: 'local',
+    model: 'mistral',
+    label: 'Local · Ollama/LM Studio · mistral',
+    tier: 'local',
+  },
+  {
+    id: 'local:qwen2.5',
+    provider: 'local',
+    model: 'qwen2.5',
+    label: 'Local · Ollama/LM Studio · qwen2.5',
+    tier: 'local',
+  },
   {
     id: 'openai:gpt-4o',
     provider: 'openai',
@@ -53,8 +74,24 @@ export const LLM_MODELS = [
 ];
 
 export const DEFAULT_MODEL_ID = 'openai:gpt-4o';
+export const LOCAL_CUSTOM_PREFIX = 'local:custom:';
+
+/** Safe local model id — mirrors backend `_LOCAL_MODEL_RE`. */
+export function isSafeLocalModelId(name) {
+  return /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,79}$/.test(String(name || '').trim());
+}
 
 export function findModel(id) {
+  if (String(id || '').startsWith(LOCAL_CUSTOM_PREFIX)) {
+    const model = String(id).slice(LOCAL_CUSTOM_PREFIX.length);
+    return {
+      id,
+      provider: 'local',
+      model,
+      label: `Local · custom · ${model}`,
+      tier: 'local',
+    };
+  }
   return LLM_MODELS.find((m) => m.id === id) || LLM_MODELS[0];
 }
 
@@ -66,9 +103,20 @@ export function resolveModelSelection({ provider, modelId, model } = {}) {
   if (model && provider) {
     const hit = LLM_MODELS.find((m) => m.provider === provider && m.model === model);
     if (hit) return { provider: hit.provider, model: hit.model, modelId: hit.id };
+    if (provider === 'local' && isSafeLocalModelId(model)) {
+      return {
+        provider: 'local',
+        model: String(model).trim(),
+        modelId: `${LOCAL_CUSTOM_PREFIX}${String(model).trim()}`,
+      };
+    }
     return { provider, model, modelId: `${provider}:${model}` };
   }
   // Legacy: provider only
+  if (provider === 'local') {
+    const hit = findModel('local:llama3.2');
+    return { provider: hit.provider, model: hit.model, modelId: hit.id };
+  }
   if (provider === 'anthropic') {
     const hit = findModel('anthropic:claude-opus-4-20250514');
     return { provider: hit.provider, model: hit.model, modelId: hit.id };

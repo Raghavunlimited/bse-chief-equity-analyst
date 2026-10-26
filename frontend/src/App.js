@@ -212,11 +212,13 @@ export default function App() {
     setAnalyzing(true);
     setAnalysis({ signal, loading: true });
     try {
+      const isLocal = settings.provider === 'local';
       const { data } = await deskAPI.analyzeSignal({
         provider: settings.provider,
         model: settings.model,
         signal,
-        useStoredKey: true,
+        // Local Ollama/LM Studio needs no vault key; cloud uses vault when configured.
+        useStoredKey: !isLocal,
       });
       const result =
         data?.analysis && typeof data.analysis === 'object'
