@@ -64,7 +64,8 @@ cd ../frontend && CI=true npm test -- --watchAll=false && npm run build
 - **Empty Signal ledger** — normal. Ledger is optional published notes, not an auto-feed of desk cards. Use desk boards; optionally **Publish notes** with data_mode live/delayed/eod (demo rows stay hidden).
 - **Only HOLD / “no qualifying signal” on Swing** — often cash/BEAR regime (e.g. Nifty below SMA50). Strategy working, not a crash.
 - **Intraday/Index “data blocked”** — after-hours freeze or missing/FALLBACK quotes. Yahoo is never labeled broker LIVE.
-- **LLM explain 422** — configure vault in Settings or pass a one-shot key in the panel. LLM explains only; it does not create or change signals.
+- **LLM explain 422** — configure vault in Settings, pass a one-shot key, **or** use provider **Local** (Ollama/LM Studio on `LOCAL_LLM_BASE_URL`). LLM explains only; it does not create or change signals.
+- **Local LLM unreachable** — start Ollama (`ollama serve` / app) or LM Studio server; `ollama pull llama3.2`; confirm `LOCAL_LLM_BASE_URL` is loopback only.
 - **Holiday calendar STALE** — operator snapshot; verify NSE circular before updating `nse_holidays.json` / `as_of`.
 - **Walk-forward 401 when API_KEY set** — send `X-API-Key`, or leave `API_KEY` empty for personal loopback UI.
 - **Fernet errors** — set a stable unique `SECRET_KEY` before storing LLM keys.

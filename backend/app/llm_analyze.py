@@ -17,8 +17,11 @@ logger = logging.getLogger(__name__)
 TIMEOUT_SEC = 90
 OPENAI_DEFAULT_MODEL = "gpt-4o"
 ANTHROPIC_DEFAULT_MODEL = "claude-opus-4-20250514"
+LOCAL_DEFAULT_MODEL = "llama3.2"
+LOCAL_KEY_SENTINEL = "local-no-key-required"
 
-# Allow-list — reject arbitrary model strings from clients
+# Allow-list — reject arbitrary model strings from cloud clients.
+# Provider ``local`` uses a safe name pattern instead (Ollama/LM Studio tags).
 ALLOWED_MODELS = {
     "openai": frozenset(
         {
@@ -38,7 +41,21 @@ ALLOWED_MODELS = {
             "claude-3-5-sonnet-20241022",
         }
     ),
+    "local": frozenset(
+        {
+            "llama3.2",
+            "llama3.1",
+            "llama3",
+            "mistral",
+            "qwen2.5",
+            "phi3",
+            "gemma2",
+            "codellama",
+        }
+    ),
 }
+
+_LOCAL_MODEL_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,79}$")
 
 DISCLAIMER = (
     "LLM research notes only — not investment advice. "
@@ -164,7 +181,96 @@ def _anthropic(
     return out
 
 
+def assert_loopback_base_url(base_url: str) -> str:
+    """
+    SSRF guard: local LLM base URL must target loopback only.
+    Accepts http://127.0.0.1:PORT/v1 or http://localhost:PORT/v1.
+    """
+    from urllib.parse import urlparse
+
+    raw = (base_url or "").strip().rstrip("/")
+    if not raw:
+        raise LlmAnalyzeError("local LLM base URL is empty", status_code=422)
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https"):
+        raise LlmAnalyzeError("local LLM URL must be http(s)", status_code=422)
+    host = (parsed.hostname or "").lower()
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        raise LlmAnalyzeError(
+            "local LLM URL must use 127.0.0.1 or localhost (loopback only)",
+            status_code=422,
+        )
+    if parsed.username or parsed.password:
+        raise LlmAnalyzeError("local LLM URL must not embed credentials", status_code=422)
+    return raw
+
+
+def _openai_compatible(
+    api_key: str,
+    user_payload: str,
+    *,
+    model: str,
+    base_url: str,
+    provider_label: str,
+) -> Dict[str, Any]:
+    """OpenAI chat-completions shape — used for openai cloud and local (Ollama/LM Studio)."""
+    root = assert_loopback_base_url(base_url) if provider_label == "local" else base_url.rstrip("/")
+    url = f"{root}/chat/completions"
+    body = {
+        "model": model,
+        "temperature": 0.2,
+        "messages": [
+            {"role": "system", "content": SYSTEM},
+            {
+                "role": "user",
+                "content": user_payload
+                + "\n\nRespond with JSON object keys: summary, bull_case, bear_case, risks, checklist.",
+            },
+        ],
+    }
+    # Cloud OpenAI supports response_format; many local servers do not — omit for local.
+    if provider_label == "openai":
+        body["response_format"] = {"type": "json_object"}
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key or LOCAL_KEY_SENTINEL}",
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:
+        raw = json.loads(resp.read().decode("utf-8"))
+    try:
+        text = raw["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise LlmAnalyzeError("Unexpected LLM response shape") from exc
+    out = _normalize(_parse_json_content(text))
+    out["provider"] = provider_label
+    out["model"] = model
+    if provider_label == "local":
+        out["local_base_host"] = "loopback"
+    return out
+
+
 def _resolve_model(provider: str, model: Optional[str]) -> str:
+    if provider == "local":
+        from app.config import config
+
+        default = config.local_llm_default_model or LOCAL_DEFAULT_MODEL
+        if not model:
+            return default
+        m = str(model).strip()
+        if m in ALLOWED_MODELS["local"]:
+            return m
+        if _LOCAL_MODEL_RE.match(m):
+            return m
+        raise LlmAnalyzeError(
+            "local model id must be alphanumeric (and ._:/-), max 80 chars",
+            status_code=422,
+        )
     allowed = ALLOWED_MODELS[provider]
     if model:
         m = str(model).strip()
@@ -183,20 +289,28 @@ def analyze_signal(
     api_key: str,
     context: Optional[Dict[str, Any]] = None,
     model: Optional[str] = None,
+    *,
+    local_base_url: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Call OpenAI or Anthropic and return structured research JSON.
+    """Call OpenAI, Anthropic, or a loopback OpenAI-compatible local server.
 
-    Never logs ``api_key``. Timeout 90s (Opus / reasoning models). Research only.
+    Never logs ``api_key``. Research commentary only — does not create/alter signals.
     """
     if not isinstance(signal, dict) or not signal:
         raise LlmAnalyzeError("signal must be a non-empty object", status_code=422)
 
     provider = (provider or "openai").lower().strip()
+    if provider not in ("openai", "anthropic", "local"):
+        raise LlmAnalyzeError(
+            "provider must be openai, anthropic, or local",
+            status_code=422,
+        )
+
     key = (api_key or "").strip()
-    if not key:
+    if provider == "local":
+        key = key or LOCAL_KEY_SENTINEL
+    elif not key:
         raise LlmAnalyzeError("api_key is required", status_code=422)
-    if provider not in ("openai", "anthropic"):
-        raise LlmAnalyzeError("provider must be openai or anthropic", status_code=422)
 
     resolved_model = _resolve_model(provider, model)
 
@@ -211,14 +325,30 @@ def analyze_signal(
     payload = {
         "signal": signal,
         "context": context or {},
-        "instruction": "Critique this research call; do not invent prices not in the payload.",
+        "instruction": (
+            "Critique this research call; do not invent prices not in the payload. "
+            "Disclose missing or stale inputs. Do not create or change BUY/SELL/HOLD."
+        ),
     }
     user_payload = json.dumps(payload, ensure_ascii=False, default=str)[:12000]
 
     try:
         if provider == "openai":
             return _openai(key, user_payload, model=resolved_model)
-        return _anthropic(key, user_payload, model=resolved_model)
+        if provider == "anthropic":
+            return _anthropic(key, user_payload, model=resolved_model)
+        from app.config import config
+
+        base = assert_loopback_base_url(
+            local_base_url or config.local_llm_base_url
+        )
+        return _openai_compatible(
+            key,
+            user_payload,
+            model=resolved_model,
+            base_url=base,
+            provider_label="local",
+        )
     except LlmAnalyzeError:
         raise
     except urllib.error.HTTPError as exc:
@@ -234,6 +364,11 @@ def analyze_signal(
         raise LlmAnalyzeError(f"LLM provider error {exc.code}", status_code=502) from exc
     except urllib.error.URLError as exc:
         logger.warning("LLM network error: %s", type(exc.reason).__name__ if exc.reason else "URLError")
+        if provider == "local":
+            raise LlmAnalyzeError(
+                "Local LLM unreachable — is Ollama/LM Studio running on LOCAL_LLM_BASE_URL?",
+                status_code=502,
+            ) from exc
         raise LlmAnalyzeError("LLM request failed (network)", status_code=502) from exc
     except Exception as exc:  # noqa: BLE001
         logger.warning("LLM analyze failed: %s", type(exc).__name__)

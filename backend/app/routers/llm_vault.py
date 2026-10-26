@@ -11,12 +11,13 @@ from app.platform_db import PlatformDB
 
 router = APIRouter(prefix="/api/me/llm", tags=["llm-vault"])
 
-Provider = Literal["openai", "anthropic"]
+Provider = Literal["openai", "anthropic", "local"]
 
 
 class LlmKeyBody(BaseModel):
     provider: Provider
-    api_key: str = Field(min_length=8, max_length=256)
+    # Local provider may store a sentinel; cloud keys stay min 8 chars (validated below).
+    api_key: str = Field(min_length=1, max_length=256)
     model: Optional[str] = Field(None, max_length=80)
 
     @field_validator("api_key")
@@ -45,10 +46,15 @@ def llm_put(
             status_code=400,
             detail="Enable AUTH_ENABLED and sign in to store an LLM key",
         )
+    key = body.api_key.strip()
+    if body.provider != "local" and len(key) < 8:
+        raise HTTPException(status_code=422, detail="api_key too short")
+    if body.provider == "local" and not key:
+        key = "local-no-key-required"
     return db.set_llm_secret(
         user_id=user["id"],
         provider=body.provider,
-        api_key=body.api_key,
+        api_key=key,
         model=body.model,
     )
 
