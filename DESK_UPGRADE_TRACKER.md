@@ -1,10 +1,10 @@
 # Desk Upgrade Tracker
 
 **Repository:** `bse-chief-equity-analyst`  
-**App version string (code):** `5.12.4-api-key-evaluate` (`backend/app/main.py`)  
-**Git HEAD:** `86fd559` on `main` (clean vs `origin/main` except audit doc edits this pass)  
+**App version string (code):** `5.12.5-signal-clarity` (`backend/app/main.py`)  
+**Branch:** `feature/signal-clarity-and-audit-pass` (from `main` @ `3e94f82`)  
 **Audit date:** 2026-10-26  
-**Current upgrade phase:** **FINAL AUDIT (post-remediation) COMPLETE** — see `FINAL_REVERSE_ENGINEERING_AUDIT.md`; **STOP — no further fixes this pass**  
+**Current upgrade phase:** **SIGNAL CLARITY + AUDIT PASS** implemented on feature branch — not merged; not production-ready  
 **Release readiness claim:** **Not production-ready for public/multi-user hosting** — personal/local research desk only (`security.production_ready_claim: false`)  
 
 ---
@@ -962,10 +962,51 @@ posture production_ready_claim=false; no secret values in posture → SPOTCHECKS
 
 **Mocks vs live:** All green results above = unittest/Jest/fixtures/TestClient. Live Yahoo/Kotak E2E not claimed.
 
-**CI gap:** `test_signal_availability.py` still omitted from `.github/workflows/ci.yml` (local green).
+**CI gap (closed on feature branch):** `test_signal_availability.py` + `test_kotak_adapter_contract.py` added to `.github/workflows/ci.yml`.
 
-**Uncommitted after this audit write:** `FINAL_REVERSE_ENGINEERING_AUDIT.md`, `DESK_UPGRADE_TRACKER.md` only (doc updates).
+**Backlog still open:** AUDIT-P0-LEDGER-002 (destructive demo delete — needs explicit OK); credentialed Kotak live e2e; PIT universe data (not available — disclosed); LLM server-snapshot design.
 
-**Backlog (not started):** AUDIT-P0-LEDGER-002 (destructive demo delete — needs explicit OK); AUDIT-P2 live harness; optional LLM server-snapshot design; CI add `test_signal_availability`.
+---
 
-**STOP — final audit complete; no product fixes this pass.**
+## Signal clarity + audit implementation pass — 2026-10-26
+
+**Branch:** `feature/signal-clarity-and-audit-pass` · **Version:** `5.12.5-signal-clarity`
+
+### Verified outcomes
+
+| Item | Result | Evidence |
+|------|--------|----------|
+| Swing cash → `no_qualifying` (not `gate_blocked`) | **VERIFIED** | `signal_availability._strategy_cash_regime`; TestClient swing `avail=no_qualifying`; `test_signal_availability` |
+| Desk boards ≠ ledger clarity | **VERIFIED** | SignalHistory / AdminPanel / PERSONAL_USE copy |
+| LLM explain-only | **VERIFIED** | LlmAnalyzePanel / SignalBoard button copy; no signal mutation |
+| Local Publish notes (AUTH off) | **VERIFIED** | AuthGate `auth_enabled:false` → UI button; API still uses synthetic admin only when AUTH off |
+| APP_VERSION floors | **VERIFIED** | `version_assert.minor_at_least` across phase/feature tests |
+| Holiday stale procedure (as_of unchanged) | **VERIFIED** | MarketEventsCalendar + PERSONAL_USE; `as_of` still `2026-01-15` |
+| API_KEY evaluate gate | **REVIEWED OK** | existing middleware + strategy_evaluation tests; empty key = local UI |
+| Kotak offline contract tests | **VERIFIED (mocks/fixtures)** | `test_kotak_adapter_contract` — **not** live e2e |
+| Survivorship / PIT disclosure | **VERIFIED** | `pit_universe_available=false`; universe honesty string; UI banner |
+| Demo ledger delete / auto-publish | **NOT DONE** (correct — out of scope) | — |
+| Live Kotak WS e2e | **BLOCKED** | no credentialed run this pass |
+
+### Test commands / results (this pass)
+
+```text
+# Backend CI-eq + new modules
+TOTAL_TESTS=242 FAIL_MODULES=0
+# includes test_signal_availability (16) + test_kotak_adapter_contract (7)
+
+cd frontend && CI=true npm test -- --watchAll=false
+→ 14 suites / 36 tests PASS
+
+npm run build → Compiled successfully
+```
+
+**Mocks vs live:** all green results = unittest/Jest/fixtures/TestClient. Live Kotak/Yahoo e2e not claimed (Yahoo 403 noise in sandbox treated as fetch fail).
+
+### Changed files (summary)
+
+- Backend: `signal_availability.py`, `strategy_evaluation.py`, `routers/strategy_evaluation.py`, `main.py`, `version_assert.py`, tests + `test_kotak_adapter_contract.py`, CI workflow  
+- Frontend: App/AuthGate/AdminPanel/SignalBoard/History/LLM/Expectancy/MarketEvents/StrategyEvaluation (+ tests)  
+- Docs: `docs/PERSONAL_USE.md`, `QUICKSTART.md`, `SIGNAL_VISIBILITY_DIAGNOSIS.md`, this tracker  
+
+**STOP for PR review — do not claim merged or production-ready.**

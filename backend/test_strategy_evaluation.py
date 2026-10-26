@@ -113,10 +113,12 @@ class UniverseHonestyTests(unittest.TestCase):
                 run_harness=False,
             )
         text = report["universe_honesty"]
-        self.assertIn("current stored list", text)
-        self.assertIn("delisted names are absent", text)
-        self.assertNotIn("proven", text.lower())
-        self.assertNotIn("solved", text.lower())
+        low = text.lower()
+        self.assertIn("current stored symbol list", low)
+        self.assertIn("delisted names are absent", low)
+        self.assertIn("point-in-time", low)
+        self.assertFalse(report.get("pit_universe_available", True))
+        self.assertNotIn("solved", low)
         self.assertFalse(report["proven"])
         for ev in report["evaluations"]:
             self.assertFalse(ev.get("proven", False))
@@ -229,10 +231,9 @@ class ApiTests(unittest.TestCase):
             object.__setattr__(config_module.config, "api_key", old_api_key)
 
     def test_version_meta_and_summary(self):
-        self.assertTrue(
-            "strategy-eval" in APP_VERSION or APP_VERSION.startswith("5.12"),
-            APP_VERSION,
-        )
+        from app.version_assert import minor_at_least
+
+        self.assertTrue(minor_at_least(APP_VERSION, 12), APP_VERSION)
         c = TestClient(app)
         meta = c.get("/api/strategy-evaluation/meta")
         self.assertEqual(meta.status_code, 200)
@@ -240,6 +241,8 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(body["selects_best"])
         self.assertFalse(body["proven"])
         self.assertFalse(body["honesty"]["oi_pcr_directional"])
+        self.assertFalse(body["honesty"]["pit_universe_available"])
+        self.assertIn("survivorship", body["honesty"]["universe_honesty"].lower())
         self.assertIn("catalog", body)
 
         audit = c.get("/api/strategy-evaluation/audit")

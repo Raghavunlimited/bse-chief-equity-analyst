@@ -22,23 +22,29 @@ export default function AuthGate({ children, onUser }) {
         if (cancelled) return;
         setStatus(data);
         if (!data.auth_enabled) {
+          // Local personal desk: AUTH off. Backend still authorizes admin APIs
+          // via synthetic local admin — UI may show Publish notes; API stays gated
+          // when AUTH_ENABLED=true.
           const op = {
             email: 'operator@local',
             role: 'operator',
             display_name: 'Personal desk',
+            auth_enabled: false,
           };
           setUser(op);
           onUser?.(op);
           return;
         }
         if (data.user && getSessionToken()) {
-          setUser(data.user);
-          onUser?.(data.user);
+          const u = { ...data.user, auth_enabled: true };
+          setUser(u);
+          onUser?.(u);
         } else if (getSessionToken()) {
           try {
             const me = await deskAPI.me();
-            setUser(me.data);
-            onUser?.(me.data);
+            const u = { ...me.data, auth_enabled: true };
+            setUser(u);
+            onUser?.(u);
           } catch {
             clearSession();
           }

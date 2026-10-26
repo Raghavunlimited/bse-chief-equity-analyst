@@ -551,7 +551,7 @@ export default function SignalBoard({
                     onAnalyze(s);
                   }}
                 >
-                  Analyze with LLM
+                  Explain with LLM (does not change this card)
                 </button>
               </div>
             )}

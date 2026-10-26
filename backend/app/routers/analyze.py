@@ -9,7 +9,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from app.auth_deps import get_optional_user, rate_limit
-from app.llm_analyze import DISCLAIMER, LlmAnalyzeError, analyze_signal
+from app.llm_analyze import (
+    DISCLAIMER,
+    LOCAL_KEY_SENTINEL,
+    LlmAnalyzeError,
+    analyze_signal,
+    assert_loopback_base_url,
+)
 from app.platform_db import PlatformDB
 from app.config import config
 
@@ -21,7 +27,7 @@ MAX_CONTEXT_BYTES = 32_768
 MAX_API_KEY_LEN = 256
 MIN_API_KEY_LEN = 8
 
-ProviderName = Literal["openai", "anthropic"]
+ProviderName = Literal["openai", "anthropic", "local"]
 
 
 def _json_size(obj: Any) -> int:
@@ -33,18 +39,23 @@ class AnalyzeRequest(BaseModel):
     model: Optional[str] = Field(
         None,
         max_length=80,
-        description="Optional model id e.g. claude-opus-4-20250514 or gpt-4o",
+        description="Optional model id e.g. claude-opus-4-20250514, gpt-4o, or llama3.2",
     )
     api_key: Optional[str] = Field(
         None,
         max_length=MAX_API_KEY_LEN,
-        description="Ephemeral BYOK — prefer server vault via PUT /api/me/llm",
+        description="Ephemeral BYOK — not required for provider=local (Ollama/LM Studio)",
     )
     signal: Dict[str, Any]
     context: Optional[Dict[str, Any]] = None
     use_stored_key: bool = Field(
         True,
         description="If true and no api_key in body, use encrypted vault key for this user",
+    )
+    local_base_url: Optional[str] = Field(
+        None,
+        max_length=200,
+        description="Override LOCAL_LLM_BASE_URL — loopback host only",
     )
 
     @field_validator("api_key")
@@ -80,31 +91,40 @@ def _resolve_credentials(
 ) -> tuple[str, str, Optional[str], str]:
     """
     Returns (provider, api_key, model, key_source).
-    Never logs api_key.
+    Never logs api_key. Local provider may omit a key.
     """
+    provider = (req.provider or "openai").lower().strip()
+
+    if provider == "local" and not req.api_key:
+        # Ollama / LM Studio typically ignore Authorization; sentinel is not a secret.
+        return "local", LOCAL_KEY_SENTINEL, req.model, "local_no_key"
+
     if req.api_key:
-        if len(req.api_key) < MIN_API_KEY_LEN:
+        if provider != "local" and len(req.api_key) < MIN_API_KEY_LEN:
             raise HTTPException(status_code=422, detail="api_key too short")
-        provider = req.provider or "openai"
         return provider, req.api_key, req.model, "ephemeral_body"
 
     if req.use_stored_key and user and user.get("id") and user["id"] != "local-dev":
         db = PlatformDB(config.db_path)
         stored = db.get_llm_api_key(user["id"])
         if stored:
-            provider, key, model = stored
+            stored_provider, key, model = stored
             return (
-                req.provider or provider,
+                req.provider or stored_provider,
                 key,
                 req.model or model,
                 "server_vault",
             )
 
+    if provider == "local":
+        return "local", LOCAL_KEY_SENTINEL, req.model, "local_no_key"
+
     raise HTTPException(
         status_code=422,
         detail=(
             "No LLM API key available. Configure one via Settings "
-            "(stored encrypted server-side) or pass api_key in the request body."
+            "(stored encrypted server-side), pass api_key in the request body, "
+            "or use provider=local with Ollama/LM Studio on loopback."
         ),
     )
 
@@ -131,6 +151,15 @@ def post_analyze(
         req.context is not None,
         request.client.host if request.client else "?",
     )
+    local_url = None
+    if provider == "local":
+        try:
+            local_url = assert_loopback_base_url(
+                req.local_base_url or config.local_llm_base_url
+            )
+        except LlmAnalyzeError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
     try:
         analysis = analyze_signal(
             req.signal,
@@ -138,6 +167,7 @@ def post_analyze(
             api_key,
             context=req.context,
             model=model,
+            local_base_url=local_url,
         )
     except LlmAnalyzeError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

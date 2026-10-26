@@ -26,4 +26,18 @@ describe('llmModels catalog', () => {
     const r = resolveModelSelection({ provider: 'anthropic' });
     expect(r.model).toContain('opus');
   });
+
+  test('local catalog and custom model resolve safely', () => {
+    const ids = LLM_MODELS.map((m) => m.id);
+    expect(ids.some((id) => id.startsWith('local:'))).toBe(true);
+    const r = resolveModelSelection({ modelId: 'local:llama3.2' });
+    expect(r.provider).toBe('local');
+    expect(r.model).toBe('llama3.2');
+    const custom = resolveModelSelection({
+      provider: 'local',
+      model: 'llama3.2:latest',
+    });
+    expect(custom.provider).toBe('local');
+    expect(custom.model).toBe('llama3.2:latest');
+  });
 });

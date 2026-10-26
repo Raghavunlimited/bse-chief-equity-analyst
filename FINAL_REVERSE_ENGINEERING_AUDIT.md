@@ -3,11 +3,11 @@
 **Repository:** `bse-chief-equity-analyst`  
 **Git HEAD:** `86fd559835d29d508612d4f0d502208d4c87e8b7` on `main` (up to date with `origin/main`)  
 **Working tree at audit start:** clean at HEAD below; **after this pass:** doc-only dirty (audit + tracker).  
-**Code version:** `5.12.4-api-key-evaluate` (`backend/app/main.py`)  
-**Audit date:** 2026-10-26 (this session)  
-**Method:** Claims verified against **code + tests run this session** — not tracker/UI alone.  
-**Deployment claim:** Personal/local research desk — `production_ready_claim: false` (code: `ops_security.security_posture`).  
-**This pass:** **Diagnosis only — no product code fixes.**
+**Code version (feature branch):** `5.12.5-signal-clarity` (`backend/app/main.py`)  
+**Audit date:** 2026-10-26  
+**Method:** Claims verified against **code + tests** — not tracker/UI alone.  
+**Deployment claim:** Personal/local research desk — `production_ready_claim: false`.  
+**Follow-on:** Signal-clarity + audit implementation on `feature/signal-clarity-and-audit-pass` (see tracker). Not merged; not production-ready.
 
 ---
 

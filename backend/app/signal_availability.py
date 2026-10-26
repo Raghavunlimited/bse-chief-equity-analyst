@@ -81,6 +81,33 @@ def _calls_list(board: dict[str, Any]) -> list[dict[str, Any]]:
     return [c for c in raw if isinstance(c, dict)]
 
 
+_CASH_REGIME_TAGS = frozenset(
+    {
+        "CASH",
+        "CASH_WEEK",
+        "BEAR_GATE",
+        "REGIME_BEAR",
+        "NO_NEW_BUY",
+        "NO_CANDIDATE",
+    }
+)
+
+
+def _strategy_cash_regime(board: dict[str, Any], calls: list[dict[str, Any]]) -> bool:
+    """
+    True when the desk deliberately shows cash / no new entries (not a data or
+    expectancy-block failure). Expectancy may still attach passed=False on HOLDs;
+    that must not override cash → no_qualifying.
+    """
+    if str(board.get("status") or "").lower() == "cash":
+        return True
+    for c in calls:
+        tags = {_upper(t) for t in (c.get("tags") or [])}
+        if tags & _CASH_REGIME_TAGS:
+            return True
+    return False
+
+
 def _gate_failure_dominant(calls: list[dict[str, Any]]) -> bool:
     """True when no BUY/SELL remain and expectancy marks insufficient/failed gates."""
     if any(_side_actionable(c.get("side")) for c in calls):
@@ -274,6 +301,7 @@ def summarize_board_availability(board: dict[str, Any]) -> dict[str, Any]:
         if err_n == len(annotated) and actionable == 0:
             data_blocked = True
 
+    # Priority: data_blocked > strategy cash (no_qualifying) > gate_blocked > no_qualifying
     if data_blocked and actionable == 0:
         code = DATA_BLOCKED
         detail = (
@@ -281,6 +309,11 @@ def summarize_board_availability(board: dict[str, Any]) -> dict[str, Any]:
             if isinstance(board.get("feed_health"), dict)
             else None
         ) or board.get("message") or _LABELS[DATA_BLOCKED]
+    elif actionable == 0 and _strategy_cash_regime(board, annotated):
+        # Cash / BEAR weeks remain no_qualifying even when HOLD rows carry
+        # expectancy.gates.passed=False (N=0) from gate_calls.
+        code = NO_QUALIFYING
+        detail = board.get("message") or _LABELS[NO_QUALIFYING]
     elif _gate_failure_dominant(annotated) and actionable == 0:
         code = GATE_BLOCKED
         detail = board.get("message") or _LABELS[GATE_BLOCKED]
