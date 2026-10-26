@@ -1,15 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from 'recharts';
 import { deskAPI } from '../services/api';
 import LlmAnalyzePanel from './LlmAnalyzePanel';
+import ChartWorkstation from './ChartWorkstation';
 
 function fmt(n, d = 1) {
   if (n == null || Number.isNaN(Number(n))) return '—';
@@ -42,7 +34,6 @@ function hasSignalContext(ctx) {
  */
 export default function StockModal({ symbol, onClose, signalContext }) {
   const [detail, setDetail] = useState(null);
-  const [bars, setBars] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -52,16 +43,11 @@ export default function StockModal({ symbol, onClose, signalContext }) {
     setLoading(true);
     setError(null);
     setDetail(null);
-    setBars([]);
     (async () => {
       try {
-        const [d, c] = await Promise.all([
-          deskAPI.getStock(symbol),
-          deskAPI.getChart(symbol, 90).catch(() => ({ data: { bars: [] } })),
-        ]);
+        const d = await deskAPI.getStock(symbol);
         if (cancelled) return;
         setDetail(d.data);
-        setBars(c.data?.bars || []);
       } catch (e) {
         if (!cancelled) {
           setError(e.response?.data?.detail || e.message || 'Failed to load');
@@ -313,51 +299,26 @@ export default function StockModal({ symbol, onClose, signalContext }) {
               )}
             </div>
 
-            {bars.length > 0 ? (
-              <div className="chart-wrap">
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={bars}>
-                    <CartesianGrid stroke="rgba(255,255,255,0.06)" />
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fill: '#8B93A7', fontSize: 10 }}
-                      tickFormatter={(v) => v.slice(5)}
-                      minTickGap={40}
-                    />
-                    <YAxis
-                      domain={['auto', 'auto']}
-                      tick={{ fill: '#8B93A7', fontSize: 10 }}
-                      width={56}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        background: '#141A22',
-                        border: '1px solid #2A3340',
-                        borderRadius: 8,
-                      }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="close"
-                      stroke="#E8A838"
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              !loading && (
-                <p className="muted modal-note">Chart appears after this symbol is ingested.</p>
-              )
-            )}
+            <div className="chart-wrap chart-wrap--pro">
+              <h4 className="pro-chart__heading">
+                Workstation · candles · volume · RSI/MACD/OI
+              </h4>
+              <ChartWorkstation
+                symbol={symbol}
+                signalContext={signalContext}
+                defaultInterval={
+                  signalContext?.entry != null || signalContext?.stop != null
+                    ? '5m'
+                    : '1d'
+                }
+              />
+            </div>
 
             {llmSignal && (
               <LlmAnalyzePanel
                 signal={llmSignal}
                 context={{
                   source: 'stock_modal',
-                  bars: bars.slice(-5),
                   signal_context: signalContext || undefined,
                 }}
               />

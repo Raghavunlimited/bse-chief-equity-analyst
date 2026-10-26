@@ -1,7 +1,13 @@
-"""Market-data adapters (quotes, bars, OI, financials)."""
+"""Market-data adapters — live only."""
 
 from app.adapters.base import MarketDataAdapter, Provenance
-from app.adapters.demo import DemoAdapter
-from app.adapters.registry import get_market_adapter
+from app.adapters.live_yahoo import LiveYahooAdapter
+from app.adapters.registry import DemoAdapterForbidden, get_market_adapter
 
-__all__ = ["MarketDataAdapter", "Provenance", "DemoAdapter", "get_market_adapter"]
+__all__ = [
+    "MarketDataAdapter",
+    "Provenance",
+    "LiveYahooAdapter",
+    "get_market_adapter",
+    "DemoAdapterForbidden",
+]

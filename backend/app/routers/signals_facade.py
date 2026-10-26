@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
+from app.signals.index_calls import build_index_calls
 from app.signals.intraday_calls import build_intraday_calls
 from app.signals.mcx_calls import build_mcx_calls
 from app.signals.swing_calls import build_swing_calls
@@ -35,4 +36,10 @@ def signals_intraday(limit: int = Query(20, ge=5, le=30)):
 @router.get("/mcx")
 def signals_mcx():
     data = build_mcx_calls()
+    return {"schema": "signals.v1", **data}
+
+
+@router.get("/index")
+def signals_index():
+    data = build_index_calls()
     return {"schema": "signals.v1", **data}

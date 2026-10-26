@@ -1,11 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { deskAPI, clearSession, getSessionToken, setSessionToken } from '../services/api';
 
+/**
+ * Phase 1: personal desk boots straight in when AUTH_ENABLED=false.
+ * Multi-user login remains available only if the API reports auth_enabled.
+ */
 export default function AuthGate({ children, onUser }) {
   const [status, setStatus] = useState(null);
   const [user, setUser] = useState(null);
-  const [email, setEmail] = useState('customer@swingdesk.local');
-  const [password, setPassword] = useState('Customer1!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [mode, setMode] = useState('login');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -18,8 +22,13 @@ export default function AuthGate({ children, onUser }) {
         if (cancelled) return;
         setStatus(data);
         if (!data.auth_enabled) {
-          setUser({ email: 'dev@local', role: 'admin', display_name: 'Local Dev' });
-          onUser?.({ email: 'dev@local', role: 'admin' });
+          const op = {
+            email: 'operator@local',
+            role: 'operator',
+            display_name: 'Personal desk',
+          };
+          setUser(op);
+          onUser?.(op);
           return;
         }
         if (data.user && getSessionToken()) {
@@ -78,11 +87,8 @@ export default function AuthGate({ children, onUser }) {
           <p className="auth-brand">Swing Desk</p>
           <h1>{mode === 'login' ? 'Sign in' : 'Create account'}</h1>
           <p className="auth-blurb">
-            Research analysis and signals — not investment advice. Demo accounts ship with the seed.
+            Optional multi-user mode. Personal desks should run with AUTH_ENABLED=false.
           </p>
-          <div className="auth-demo-hint" role="note">
-            Demo: customer@swingdesk.local / Customer1! · admin@swingdesk.local / AdminDemo1!
-          </div>
           <form onSubmit={submit}>
             <label>
               Email
@@ -125,26 +131,22 @@ export default function AuthGate({ children, onUser }) {
   if (!status && !user) {
     return (
       <div className="auth-gate">
-        <p className="auth-loading">Checking session…</p>
+        <p className="auth-loading">Starting personal desk…</p>
       </div>
     );
   }
 
   return (
     <>
-      {user ? (
+      {status?.auth_enabled && user ? (
         <div className="auth-bar" role="banner">
           <span>
             {user.display_name || user.email}
             {user.role === 'admin' ? ' · Admin' : ''}
           </span>
-          {status?.auth_enabled ? (
-            <button type="button" className="auth-logout" onClick={logout}>
-              Sign out
-            </button>
-          ) : (
-            <span className="auth-dev">AUTH off (local)</span>
-          )}
+          <button type="button" className="auth-logout" onClick={logout}>
+            Sign out
+          </button>
         </div>
       ) : null}
       {children}

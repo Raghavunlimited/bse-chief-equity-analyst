@@ -14,24 +14,15 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app import live_quotes
-
-
-def _session_vwap(closes: list[float], volumes: list[float]) -> float | None:
-    """Cumulative session VWAP = Σ(close×volume) / Σ(volume). None if no usable volume."""
-    n = min(len(closes), len(volumes))
-    if n == 0:
-        return None
-    pv = 0.0
-    vv = 0.0
-    for i in range(n):
-        v = volumes[i]
-        if v is None or v <= 0:
-            continue
-        pv += float(closes[i]) * float(v)
-        vv += float(v)
-    if vv <= 0:
-        return None
-    return pv / vv
+from app.market_session import build_feed_health, freeze_live_sides, session_snapshot
+from app.market_types import LiveQuote
+from app.strategy.intraday_core import (
+    STRATEGY_ID as INTRADAY_STRATEGY_ID,
+    STRATEGY_VERSION as INTRADAY_STRATEGY_VERSION,
+    rsi as _rsi,
+    score_intraday_bias,
+    session_vwap as _session_vwap,
+)
 
 # Liquid NSE watchlist (Yahoo .NS)
 DEFAULT_WATCH = [
@@ -48,7 +39,7 @@ DEFAULT_WATCH = [
     "KOTAKBANK",
     "BAJFINANCE",
     "MARUTI",
-    "TATAMOTORS",
+    "TMPV",  # Tata Motors PV (Yahoo); legacy TATAMOTORS may 404
     "TATASTEEL",
     "SUNPHARMA",
     "HCLTECH",
@@ -63,41 +54,10 @@ DEFAULT_WATCH = [
 ]
 
 
-def _session_state_ist() -> dict[str, Any]:
-    """Rough NSE cash session flags (IST = UTC+5:30)."""
-    now = datetime.now(timezone.utc)
-    # Convert to IST minutes from midnight
-    ist_min = (now.hour * 60 + now.minute + 330) % (24 * 60)
-    open_m, close_m = 9 * 60 + 15, 15 * 60 + 30
-    pre = 9 * 60
-    in_session = open_m <= ist_min <= close_m
-    return {
-        "in_session": in_session,
-        "pre_market": pre <= ist_min < open_m,
-        "ist_minute": ist_min,
-        "note": "NSE cash ~09:15–15:30 IST. Outside hours, signals are last-session residue.",
-    }
-
-
-def _rsi(closes: list[float], period: int = 14) -> float | None:
-    if len(closes) < period + 1:
-        return None
-    gains = []
-    losses = []
-    for i in range(-period, 0):
-        d = closes[i] - closes[i - 1]
-        gains.append(max(d, 0.0))
-        losses.append(max(-d, 0.0))
-    ag = sum(gains) / period
-    al = sum(losses) / period
-    if al == 0:
-        return 100.0
-    rs = ag / al
-    return round(100.0 - (100.0 / (1.0 + rs)), 2)
-
-
-def _signal_for(symbol: str, snap: dict[str, Any]) -> dict[str, Any]:
-    price = snap.get("price")
+def _signal_for(symbol: str, snap: dict[str, Any] | LiveQuote) -> dict[str, Any]:
+    if isinstance(snap, LiveQuote):
+        snap = snap.to_dict()
+    price = snap.get("price") or snap.get("ltp")
     opens = snap.get("session_open")
     high = snap.get("session_high")
     low = snap.get("session_low")
@@ -105,104 +65,47 @@ def _signal_for(symbol: str, snap: dict[str, Any]) -> dict[str, Any]:
     closes = list(snap.get("closes_5m") or [])
     volumes = list(snap.get("volumes_5m") or [])
     change = snap.get("change_pct")
+    feed_status = snap.get("feed_status")
+    age_sec = snap.get("age_sec")
 
-    score = 50.0
-    tags: list[str] = []
-    side = "FLAT"
-    vwap: float | None = None
-
-    if price is None:
+    mds = snap.get("market_data_state") or feed_status
+    src = snap.get("source")
+    if price is None or feed_status == "ERROR" or mds in ("ERROR", "UNAVAILABLE"):
         return {
             "symbol": symbol,
             "side": "FLAT",
             "score": 0,
-            "thesis": "No live quote",
-            "tags": ["NO_QUOTE"],
+            "thesis": f"Quote ERROR — {snap.get('error') or 'no LTP'} (no demo fallback)",
+            "tags": ["NO_QUOTE", "FEED_ERROR"],
             "price": None,
+            "price_kind": "ltp",
+            "feed_status": "ERROR",
+            "market_data_state": "ERROR",
+            "source": src,
+            "quote_source": src,
+            "quote_age_sec": age_sec,
+            "is_current_live": False,
+            "timeframe": snap.get("timeframe") or "ltp",
+            "strategy_id": INTRADAY_STRATEGY_ID,
+            "strategy_version": INTRADAY_STRATEGY_VERSION,
         }
 
-    # Bias vs previous close
-    if change is not None:
-        score += max(-15.0, min(15.0, change * 3.0))
-        if change >= 0.8:
-            tags.append("STRONG_UP")
-        elif change <= -0.8:
-            tags.append("STRONG_DOWN")
-
-    # Vs session open
-    if opens and price:
-        day_pct = (price / opens - 1.0) * 100.0
-        score += max(-10.0, min(10.0, day_pct * 2.5))
-        tags.append("ABOVE_OPEN" if day_pct > 0 else "BELOW_OPEN")
-
-    # Range position
-    if high and low and high > low and price:
-        loc = (price - low) / (high - low)
-        if loc >= 0.75:
-            score += 6
-            tags.append("NEAR_HIGH")
-        elif loc <= 0.25:
-            score -= 6
-            tags.append("NEAR_LOW")
-
-    # Short momentum (last ~6 bars vs prior 6)
-    if len(closes) >= 12:
-        a = sum(closes[-6:]) / 6
-        b = sum(closes[-12:-6]) / 6
-        if b:
-            mom = (a / b - 1.0) * 100.0
-            score += max(-12.0, min(12.0, mom * 8.0))
-            tags.append("MOM_UP" if mom > 0 else "MOM_DOWN")
-
-    rsi = _rsi(closes) if closes else None
-    if rsi is not None:
-        if rsi >= 65:
-            score += 4
-            tags.append("RSI_HOT")
-        elif rsi <= 35:
-            score -= 4
-            tags.append("RSI_COLD")
-
-    # Session VWAP from 5m close×volume (research bias tag — not exchange tick VWAP)
-    vwap = _session_vwap(closes, volumes) if closes else None
-    if vwap is not None and price:
-        if price >= vwap:
-            score += 5
-            tags.append("VWAP_ABOVE")
-        else:
-            score -= 5
-            tags.append("VWAP_BELOW")
-    elif closes:
-        # No usable bar volume — do not invent a typical-price "edge"; label only
-        tags.append("VWAP_PROXY")
-
-    # ORB-lite: first ~12 bars (~60m) range break
-    if len(closes) >= 18:
-        orb_high = max(closes[:12])
-        orb_low = min(closes[:12])
-        if price > orb_high * 1.001:
-            score += 8
-            tags.append("ORB_BREAK_UP")
-        elif price < orb_low * 0.999:
-            score -= 8
-            tags.append("ORB_BREAK_DOWN")
-
-    score = round(max(0.0, min(100.0, score)), 1)
-    if score >= 62:
-        side = "LONG"
-    elif score <= 38:
-        side = "SHORT"
-    else:
-        side = "FLAT"
-
-    stop = None
-    target = None
-    if side == "LONG" and price and low:
-        stop = round(min(low, price * 0.992), 2)
-        target = round(price * 1.006, 2)
-    elif side == "SHORT" and price and high:
-        stop = round(max(high, price * 1.008), 2)
-        target = round(price * 0.994, 2)
+    core = score_intraday_bias(
+        price=float(price),
+        closes_5m=closes,
+        volumes_5m=volumes,
+        change_pct=float(change) if change is not None else None,
+        session_open=float(opens) if opens is not None else None,
+        session_high=float(high) if high is not None else None,
+        session_low=float(low) if low is not None else None,
+    )
+    side = core["side"]
+    score = core["score"]
+    tags = list(core["tags"])
+    rsi = core["rsi_5m"]
+    vwap = core["vwap"]
+    stop = core["stop"]
+    target = core["target"]
 
     thesis_bits = [
         f"{side} bias @ ₹{price:,.2f}",
@@ -212,6 +115,12 @@ def _signal_for(symbol: str, snap: dict[str, Any]) -> dict[str, Any]:
     ]
     thesis = " · ".join(t for t in thesis_bits if t)
 
+    is_live = bool(snap.get("is_current_live"))
+    if mds == "FALLBACK":
+        tags = list(dict.fromkeys([*tags, "YAHOO_FALLBACK", "NOT_BROKER_LIVE"]))
+    elif mds == "LIVE" and is_live:
+        tags = list(dict.fromkeys([*tags, "KOTAK_LIVE"]))
+
     return {
         "symbol": symbol,
         "yahoo_symbol": snap.get("yahoo_symbol"),
@@ -220,13 +129,29 @@ def _signal_for(symbol: str, snap: dict[str, Any]) -> dict[str, Any]:
         "thesis": thesis,
         "tags": tags,
         "price": price,
+        "price_kind": "ltp",
+        "feed_status": feed_status,
+        "market_data_state": mds,
+        "source": src,
+        "quote_source": src,
+        "provider_class": snap.get("provider_class"),
+        "is_current_live": is_live,
+        "is_last_observation": bool(snap.get("is_last_observation")),
+        "timeframe": "5m",
+        "strategy_id": INTRADAY_STRATEGY_ID,
+        "strategy_version": INTRADAY_STRATEGY_VERSION,
+        "data_interval": "5m",
+        "quote_age_sec": age_sec,
+        "quote_ts_iso": snap.get("quote_ts_iso"),
+        "ingestion_ts_iso": snap.get("ingestion_ts_iso") or snap.get("as_of"),
         "change_pct": change,
         "prev_close": prev,
+        "eod_anchor_prev_close": prev,
         "session_open": opens,
         "session_high": high,
         "session_low": low,
         "rsi_5m": rsi,
-        "vwap": round(vwap, 2) if vwap is not None else None,
+        "vwap": vwap,
         "stop": stop,
         "target": target,
         "currency": snap.get("currency") or "INR",
@@ -236,7 +161,7 @@ def _signal_for(symbol: str, snap: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_intraday_desk(limit: int = 20) -> dict[str, Any]:
-    session = _session_state_ist()
+    session = session_snapshot()
     # Prefer names we already store EOD for (more liquid / known)
     try:
         from app.config import config
@@ -250,6 +175,8 @@ def build_intraday_desk(limit: int = 20) -> dict[str, Any]:
 
     yahoo_map = {s: f"{s}.NS" for s in watch}
     snaps = live_quotes.fetch_many(list(yahoo_map.values()))
+    quote_list = list(snaps.values())
+    health = build_feed_health(quote_list, session=session)
 
     signals: list[dict[str, Any]] = []
     for sym, ysym in yahoo_map.items():
@@ -260,13 +187,55 @@ def build_intraday_desk(limit: int = 20) -> dict[str, Any]:
                     "symbol": sym,
                     "side": "FLAT",
                     "score": 0,
-                    "thesis": "Quote unavailable",
-                    "tags": ["NO_QUOTE"],
+                    "thesis": "LIVE quote missing — no demo fallback",
+                    "tags": ["NO_QUOTE", "FEED_ERROR"],
                     "price": None,
+                    "price_kind": "ltp",
+                    "feed_status": "ERROR",
                 }
             )
             continue
         signals.append(_signal_for(sym, snap))
+
+    if not health.live_calls_allowed:
+        signals = freeze_live_sides(
+            signals,
+            health.message,
+            market_data_state=str(health.market_data_state or health.feed_status),
+        )
+
+    # Phase 3: blend PCR / walls when an equity option chain is already active
+    try:
+        from app.kotak.option_chain import apply_chain_to_signal, get_option_chain_engine
+
+        eng = get_option_chain_engine()
+        for i, sig in enumerate(signals):
+            sym = str(sig.get("symbol") or "").upper()
+            # Map LONG/SHORT → BUY/SELL for shared chain rules
+            side = str(sig.get("side") or "").upper()
+            mapped = dict(sig)
+            if side == "LONG":
+                mapped["side"] = "BUY"
+            elif side == "SHORT":
+                mapped["side"] = "SELL"
+            try:
+                st = eng.status(sym)
+                snap = eng.snapshot(sym) if st.get("active") else None
+            except Exception:  # noqa: BLE001
+                snap = None
+            blended = apply_chain_to_signal(mapped, snap)
+            if side in ("LONG", "SHORT", "FLAT"):
+                # Restore intraday vocabulary
+                bs = blended.get("side")
+                if bs == "BUY":
+                    blended["side"] = "LONG"
+                elif bs == "SELL":
+                    blended["side"] = "SHORT"
+                elif bs == "HOLD":
+                    blended["side"] = "FLAT"
+            signals[i] = blended
+    except Exception:  # noqa: BLE001
+        pass
 
     signals.sort(key=lambda x: float(x.get("score") or 0), reverse=True)
     longs = [s for s in signals if s.get("side") == "LONG"]
@@ -276,23 +245,26 @@ def build_intraday_desk(limit: int = 20) -> dict[str, Any]:
         "desk": "intraday",
         "as_of": datetime.now(timezone.utc).isoformat(),
         "session": session,
-        "poll_seconds": 15,
+        "feed_health": health.to_dict(),
+        "live_calls_allowed": health.live_calls_allowed,
+        "poll_seconds": 5,
         "count": len(signals),
         "long_count": len(longs),
         "short_count": len(shorts),
         "signals": signals,
         "top_longs": longs[:5],
         "top_shorts": shorts[:5],
-        "message": (
-            "Live 5m Yahoo bias for liquid NSE cash. "
-            + (
-                "Session open — treat as active research tape."
-                if session["in_session"]
-                else "Outside NSE hours — last session residue; wait for open for fresh edge."
-            )
-        ),
+        "message": health.message,
         "disclaimer": (
             "Educational research only. Intraday markets are noisy; "
-            "no signal guarantees profit. Use hard stops and size risk 0.25–0.5% per idea."
+            "no signal guarantees profit. Use hard stops and size risk 0.25–0.5% per idea. "
+            "Prices are LTP (price_kind=ltp), not EOD closes. "
+            "Yahoo age-fresh tape is FALLBACK (not Kotak broker LIVE)."
         ),
+        "data_contract": {
+            "price_kind": "ltp",
+            "broker_live": health.broker_live,
+            "market_data_state": health.market_data_state,
+            "calendar_note": health.calendar_note,
+        },
     }

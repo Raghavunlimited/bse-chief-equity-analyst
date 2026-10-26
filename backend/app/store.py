@@ -58,6 +58,26 @@ CREATE TABLE IF NOT EXISTS screener_results (
   metadata TEXT,
   PRIMARY KEY(symbol, screening_date)
 );
+
+CREATE TABLE IF NOT EXISTS expectancy_metrics (
+  rule_id TEXT NOT NULL,
+  desk TEXT NOT NULL,
+  regime TEXT NOT NULL,
+  sample_size INTEGER NOT NULL,
+  win_rate_pct REAL,
+  avg_win_r REAL,
+  avg_loss_r REAL,
+  expectancy_r REAL,
+  profit_factor REAL,
+  max_drawdown_pct REAL,
+  as_of TEXT,
+  computed_at TEXT NOT NULL,
+  meta_json TEXT,
+  PRIMARY KEY(rule_id, regime)
+);
+
+CREATE INDEX IF NOT EXISTS idx_expectancy_desk ON expectancy_metrics(desk);
+CREATE INDEX IF NOT EXISTS idx_expectancy_computed ON expectancy_metrics(computed_at);
 """
 
 
@@ -217,33 +237,77 @@ class Database:
         with self.get_connection() as conn:
             return [r[0] for r in conn.execute(query, params).fetchall()]
 
-    def freshness(self, max_age_days: int = 3) -> dict:
+    def freshness(
+        self,
+        max_age_days: int = 3,
+        *,
+        now: datetime | None = None,
+    ) -> dict:
+        """
+        EOD freshness vs expected trading session (holiday-aware).
+
+        ``age_days`` is trading-day age vs ``expected_eod_as_of`` (not raw weekdays).
+        """
+        from app.nse_calendar import (
+            calendar_public_status,
+            expected_eod_as_of,
+            load_holiday_dates,
+            trading_days_between,
+        )
+        from zoneinfo import ZoneInfo
+
+        IST = ZoneInfo("Asia/Kolkata")
         latest = self.get_max_trade_date()
+        holidays, meta = load_holiday_dates()
+        dt = now.astimezone(IST) if now is not None else datetime.now(IST)
+        expected = expected_eod_as_of(dt, holidays=holidays)
+        cal = calendar_public_status(now=dt)
+
         if not latest:
             return {
                 "status": "EMPTY",
                 "latest_date": None,
+                "expected_as_of": expected.isoformat(),
                 "age_days": None,
-                "message": "No EOD data. Run ingest.",
+                "age_unit": "trading_days",
+                "holiday_calendar_applied": meta.applied,
+                "holiday_list_complete": meta.complete,
+                "calendar": cal,
+                "message": "No EOD data. Run Refresh / Force full or wait for scheduled ingest.",
             }
-        latest_dt = datetime.strptime(latest, "%Y-%m-%d")
-        # Age vs last weekday (markets closed weekends)
-        ref = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        while ref.weekday() >= 5:
-            ref -= timedelta(days=1)
-        # After ~18:30 IST previous day may still be "today's" settle; use calendar age
-        age = (ref.date() - latest_dt.date()).days
+
+        latest_d = datetime.strptime(latest, "%Y-%m-%d").date()
+        if latest_d >= expected:
+            age = 0
+        else:
+            age = trading_days_between(latest_d, expected, holidays=holidays)
+
         if age <= 1:
             status = "FRESH"
         elif age <= max_age_days:
             status = "RECENT"
         else:
             status = "STALE"
+
+        incomplete_note = ""
+        if not meta.complete:
+            incomplete_note = (
+                " Holiday list incomplete/missing — weekday holidays may be wrong."
+            )
+
         return {
             "status": status,
             "latest_date": latest,
+            "expected_as_of": expected.isoformat(),
             "age_days": age,
-            "message": f"Latest EOD {latest} ({age}d old) — {status}",
+            "age_unit": "trading_days",
+            "holiday_calendar_applied": meta.applied,
+            "holiday_list_complete": meta.complete,
+            "calendar": cal,
+            "message": (
+                f"Latest EOD {latest}; expected {expected.isoformat()} "
+                f"({age} trading day(s) behind) — {status}.{incomplete_note}"
+            ),
         }
 
     def get_joined_snapshot(self, as_of: str) -> pd.DataFrame:

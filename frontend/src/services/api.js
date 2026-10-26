@@ -67,11 +67,11 @@ export const deskAPI = {
     api.get('/api/platform/signals', {
       params: { category, history, limit, symbol },
     }),
-  platformDemoSignals: () => api.get('/api/platform/demo/signals'),
   platformInstruments: (category) =>
     api.get('/api/platform/instruments', { params: { category } }),
   marketQuote: (symbol, category = 'swing') =>
     api.get(`/api/platform/market/${symbol}/quote`, { params: { category } }),
+  getMarketSession: () => api.get('/api/market/session'),
   methodology: () => api.get('/api/methodology'),
 
   llmVaultStatus: () => api.get('/api/me/llm'),
@@ -90,8 +90,13 @@ export const deskAPI = {
     api.post(`/api/ingest/latest?force=${force ? 'true' : 'false'}`),
   getIngestProgress: () => api.get('/api/ingest/progress'),
   ingestStatus: () => api.get('/api/ingest/status'),
+  ingestCalendar: () => api.get('/api/ingest/calendar'),
+  ingestJournal: (limit = 10) =>
+    api.get('/api/ingest/journal', { params: { limit } }),
   kotakStatus: () => api.get('/api/feeds/kotak'),
   testKotak: () => api.post('/api/feeds/kotak/test'),
+  kotakFeedStatus: () => api.get('/api/kotak/feed/status'),
+  kotakSessionStatus: () => api.get('/api/kotak/session'),
   getWeeklyPicks: ({
     asOf,
     capital,
@@ -115,8 +120,21 @@ export const deskAPI = {
   getMarketRegime: () => api.get('/api/market-regime'),
   runBacktest: (body = {}) => api.post('/api/backtest', body),
   getStock: (symbol) => api.get(`/api/stock/${symbol}`),
-  getChart: (symbol, days = 90) =>
-    api.get(`/api/chart/${symbol}`, { params: { days } }),
+  getChart: (symbol, daysOrOpts = 90) => {
+    const opts =
+      typeof daysOrOpts === 'object' && daysOrOpts != null
+        ? daysOrOpts
+        : { days: daysOrOpts };
+    return api.get(`/api/chart/${symbol}`, {
+      params: {
+        ...(opts.days != null ? { days: opts.days } : {}),
+        ...(opts.interval ? { interval: opts.interval } : {}),
+        ...(opts.limit != null ? { limit: opts.limit } : {}),
+      },
+    });
+  },
+  getChartLive: (symbol, interval = '5m') =>
+    api.get(`/api/chart/${symbol}/live`, { params: { interval } }),
   getFundamentals: (symbol, refresh = false) =>
     api.get(`/api/stock/${symbol}/fundamentals`, { params: { refresh } }),
   searchStocks: (q) => api.get('/api/stocks/search', { params: { q } }),
@@ -127,6 +145,16 @@ export const deskAPI = {
   getJournal: (week) =>
     api.get('/api/journal', { params: week ? { week } : {} }),
   saveJournal: (entry) => api.post('/api/journal', entry),
+
+  getLedgerSummary: () => api.get('/api/ledger/summary'),
+  getLedgerTrades: (params = {}) => api.get('/api/ledger/trades', { params }),
+  openLedgerTrade: (body) => api.post('/api/ledger/trades', body),
+  exitLedgerTrade: (id, body) => api.post(`/api/ledger/trades/${encodeURIComponent(id)}/exits`, body),
+  correctLedgerTrade: (id, body) =>
+    api.patch(`/api/ledger/trades/${encodeURIComponent(id)}`, body),
+  postLedgerMovement: (body) => api.post('/api/ledger/capital/movements', body),
+  getLedgerAudit: (limit = 100) =>
+    api.get('/api/ledger/audit', { params: { limit } }),
   getIntradaySignals: (limit = 20) =>
     api.get('/api/intraday/signals', { params: { limit } }),
   getMcxSignals: () => api.get('/api/mcx/signals'),
@@ -135,11 +163,30 @@ export const deskAPI = {
   getConsultantIntraday: (limit = 20) =>
     api.get('/api/consultant/intraday', { params: { limit } }),
   getConsultantMcx: () => api.get('/api/consultant/mcx'),
+  getConsultantIndex: () => api.get('/api/consultant/index'),
 
   getIntradayDesk: (limit = 20) =>
     consultantOrFallback(`/api/consultant/intraday?limit=${limit}`, () =>
       deskAPI.getIntradaySignals(limit),
     ),
+  getIndexDesk: () =>
+    consultantOrFallback('/api/consultant/index', () =>
+      api.get('/api/signals/index'),
+    ),
+
+  getOptionChain: (underlying, { activate_if_needed = false, expiry_mode = 'nearest', wing = 15 } = {}) =>
+    api.get(`/api/kotak/option-chain/${encodeURIComponent(underlying)}`, {
+      params: { activate_if_needed, expiry_mode, wing },
+    }),
+  activateOptionChain: (body) => api.post('/api/kotak/option-chain/activate', body),
+  optionChainStatus: (underlying) =>
+    api.get('/api/kotak/option-chain/status', {
+      params: underlying ? { underlying } : {},
+    }),
+  optionChainExpiries: (underlying) =>
+    api.get(`/api/kotak/option-chain/${encodeURIComponent(underlying)}/expiries`),
+  getOptionOiViz: (underlying) =>
+    api.get(`/api/kotak/option-chain/${encodeURIComponent(underlying)}/oi-viz`),
   getMcxDesk: () =>
     consultantOrFallback('/api/consultant/mcx', () => deskAPI.getMcxSignals()),
   getSwingConsultant: async () => {
@@ -169,6 +216,22 @@ export const deskAPI = {
       },
       { timeout: 120000 },
     ),
+
+  /** Research risk sizing — not an order. */
+  calculatePositionSize: (body) => api.post('/api/position-sizing/calculate', body),
+  positionSizingMeta: () => api.get('/api/position-sizing/meta'),
+
+  /** Identifiable-source market events — no invented dates. */
+  getMarketEvents: (params = {}) =>
+    api.get('/api/market-events', { params }),
+  marketEventsMeta: () => api.get('/api/market-events/meta'),
+
+  /** Strategy evaluation — research evidence only; never crowns a winner. */
+  getStrategyEvaluation: (params = {}) =>
+    api.get('/api/strategy-evaluation', { params }),
+  runStrategyEvaluation: (body = {}) =>
+    api.post('/api/strategy-evaluation/evaluate', body, { timeout: 300000 }),
+  strategyEvaluationMeta: () => api.get('/api/strategy-evaluation/meta'),
 };
 
 export default deskAPI;

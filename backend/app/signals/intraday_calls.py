@@ -36,34 +36,46 @@ def build_intraday_calls(
             .replace("SHORT bias", "SELL bias")
             .replace("FLAT bias", "HOLD bias")
         )
-        calls.append(
-            make_call(
-                desk="intraday",
-                symbol=str(s.get("symbol") or g.get("symbol") or ""),
-                side=g["side"],
-                confidence=g["confidence"],
-                thesis=thesis,
-                entry=s.get("price"),
-                stop=s.get("stop"),
-                targets={"t1": s["target"]} if s.get("target") is not None else {},
-                tags=g.get("tags") or [],
-                sources=["yahoo_5m", "intraday_desk"],
-                horizon="intraday",
-                ttl_hours=0.5,
-                as_of=desk.get("as_of"),
-                disclaimer=INTRADAY_DISCLAIMER,
-                extras={
-                    "change_pct": s.get("change_pct"),
-                    "rsi_5m": s.get("rsi_5m"),
-                    "raw_side": s.get("side"),
-                    "score": s.get("score"),
-                },
-            )
+        tags = list(g.get("tags") or [])
+        for t in s.get("tags") or []:
+            if t not in tags:
+                tags.append(t)
+        call = make_call(
+            desk="intraday",
+            symbol=str(s.get("symbol") or g.get("symbol") or ""),
+            side=g["side"],
+            confidence=g["confidence"],
+            thesis=thesis,
+            entry=s.get("price"),
+            stop=s.get("stop"),
+            targets={"t1": s["target"]} if s.get("target") is not None else {},
+            tags=tags,
+            sources=[s.get("quote_source") or s.get("source") or "yahoo_5m", "intraday_desk"],
+            horizon="intraday",
+            ttl_hours=0.5,
+            as_of=desk.get("as_of"),
+            disclaimer=INTRADAY_DISCLAIMER,
+            extras={
+                "change_pct": s.get("change_pct"),
+                "rsi_5m": s.get("rsi_5m"),
+                "raw_side": s.get("side"),
+                "score": s.get("score"),
+            },
         )
+        # Preserve feed honesty from strategy desk (freeze / FALLBACK / STALE)
+        call["market_data_state"] = s.get("market_data_state") or s.get("feed_status")
+        call["quote_source"] = s.get("quote_source") or s.get("source")
+        call["quote_age_sec"] = s.get("quote_age_sec") or s.get("age_sec")
+        call["is_current_live"] = s.get("is_current_live") is True
+        call["is_last_observation"] = s.get("is_last_observation") is True
+        call["signal_generation"] = s.get("signal_generation")
+        if s.get("observation"):
+            call["observation"] = s.get("observation")
+        calls.append(call)
 
+    db = Database(config.db_path)
     if enrich and calls:
         # Top N BUY/SELL only — Screener rate limit; volume from local store
-        db = Database(config.db_path)
         attach_enrichment(
             calls,
             db=db,
@@ -71,18 +83,35 @@ def build_intraday_calls(
             sides=("BUY", "SELL"),
         )
 
-    return {
-        "desk": "intraday",
-        "horizon": "daily",
-        "session": session,
-        "poll_seconds": desk.get("poll_seconds", 15),
-        "as_of": desk.get("as_of"),
-        "calls": calls,
-        "brief": daily_brief(calls, []),
-        "count": len(calls),
-        "buy_count": sum(1 for c in calls if c["side"] == "BUY"),
-        "sell_count": sum(1 for c in calls if c["side"] == "SELL"),
-        "hold_count": sum(1 for c in calls if c["side"] == "HOLD"),
-        "message": desk.get("message"),
-        "disclaimer": desk.get("disclaimer") or INTRADAY_DISCLAIMER or DISCLAIMER,
-    }
+    from app.expectancy.gate import gate_calls
+
+    as_of = desk.get("as_of")
+    as_of_day = as_of[:10] if isinstance(as_of, str) and len(as_of) >= 10 else None
+    calls, exp_regime = gate_calls(
+        calls, db=db, desk="intraday", as_of=as_of_day, auto_refresh=True
+    )
+
+    from app.signal_availability import attach_board_availability
+
+    return attach_board_availability(
+        {
+            "desk": "intraday",
+            "horizon": "daily",
+            "strategy": "intraday_desk",
+            "session": session,
+            "feed_health": desk.get("feed_health"),
+            "live_calls_allowed": desk.get("live_calls_allowed"),
+            "poll_seconds": desk.get("poll_seconds", 15),
+            "as_of": desk.get("as_of"),
+            "expectancy_regime": exp_regime,
+            "calls": calls,
+            "signals": calls,
+            "brief": daily_brief(calls, []),
+            "count": len(calls),
+            "buy_count": sum(1 for c in calls if c["side"] == "BUY"),
+            "sell_count": sum(1 for c in calls if c["side"] == "SELL"),
+            "hold_count": sum(1 for c in calls if c["side"] == "HOLD"),
+            "message": desk.get("message"),
+            "disclaimer": desk.get("disclaimer") or INTRADAY_DISCLAIMER or DISCLAIMER,
+        }
+    )

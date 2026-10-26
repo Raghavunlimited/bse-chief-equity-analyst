@@ -1,9 +1,9 @@
 """
-MCX / commodities desk — research signals on major metals & energy.
+Commodities research desk — global futures proxy (not exchange-listed MCX).
 
-Uses global futures (Yahoo) as a liquid proxy for Indian commodity direction
-(Gold, Silver, Crude, NatGas, Copper). INR spot FX shown for context.
-Not a substitute for MCX contract specs / margins / lot sizes.
+Feed: Yahoo continuous futures + USDINR FX. Prices are USD (or INR for FX).
+Related MCX names are unvalidated hints only. No lot/margin/order instructions.
+Expectancy gate: intentionally disabled (proxy data ≠ MCX strategy).
 """
 from __future__ import annotations
 
@@ -11,67 +11,70 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app import live_quotes
+from app.market_types import LiveQuote
+from app.strategy.mcx_instruments import INSTRUMENTS, public_catalog
 
-# Display name → Yahoo futures / FX
-COMMODITIES: list[dict[str, str]] = [
+# Back-compat alias for older imports / playbooks
+COMMODITIES = [
     {
-        "id": "GOLD",
-        "name": "Gold",
-        "yahoo": "GC=F",
-        "mcx_hint": "GOLD / GOLDM",
-        "unit": "USD/oz",
-        "group": "metals",
-    },
-    {
-        "id": "SILVER",
-        "name": "Silver",
-        "yahoo": "SI=F",
-        "mcx_hint": "SILVER / SILVERM",
-        "unit": "USD/oz",
-        "group": "metals",
-    },
-    {
-        "id": "CRUDE",
-        "name": "Crude Oil",
-        "yahoo": "CL=F",
-        "mcx_hint": "CRUDEOIL / CRUDEOILM",
-        "unit": "USD/bbl",
-        "group": "energy",
-    },
-    {
-        "id": "NATGAS",
-        "name": "Natural Gas",
-        "yahoo": "NG=F",
-        "mcx_hint": "NATURALGAS",
-        "unit": "USD/mmBtu",
-        "group": "energy",
-    },
-    {
-        "id": "COPPER",
-        "name": "Copper",
-        "yahoo": "HG=F",
-        "mcx_hint": "COPPER",
-        "unit": "USD/lb",
-        "group": "metals",
-    },
-    {
-        "id": "USDINR",
-        "name": "USD / INR",
-        "yahoo": "INR=X",
-        "mcx_hint": "FX context for MCX INR pricing",
-        "unit": "INR per USD",
-        "group": "fx",
-    },
+        "id": r["id"],
+        "name": r["name"],
+        "yahoo": r["yahoo"],
+        "mcx_hint": (
+            " / ".join(r["related_mcx_symbols"])
+            if r["related_mcx_symbols"]
+            else r.get("mcx_mapping_status", "")
+        ),
+        "unit": r["unit"],
+        "group": r["group"],
+    }
+    for r in INSTRUMENTS
 ]
+
+DESK_DISCLAIMER = (
+    "Research only — not MCX advice and not order instructions. "
+    "Quotes are global futures / FX proxies (usually USD), not INR MCX contracts. "
+    "Related MCX names are unvalidated hints. Confirm contract, lot, tick, "
+    "margin, and session with your broker. App does not size lots."
+)
+
+
+def _snap_to_dict(snap: LiveQuote | dict[str, Any] | None) -> dict[str, Any] | None:
+    """Normalize LiveQuote or dict to a flat quote dict with ``price``."""
+    if snap is None:
+        return None
+    if isinstance(snap, LiveQuote):
+        d = snap.to_dict()
+    elif isinstance(snap, dict):
+        d = dict(snap)
+    else:
+        return None
+    if d.get("price") is None and d.get("ltp") is not None:
+        d["price"] = d["ltp"]
+    return d
 
 
 def _bias(snap: dict[str, Any]) -> dict[str, Any]:
+    """Directional bias on the *proxy* tape (USD continuous), not MCX INR."""
     price = snap.get("price")
     change = snap.get("change_pct")
     high = snap.get("session_high")
     low = snap.get("session_low")
     opens = snap.get("session_open")
     closes = list(snap.get("closes_5m") or [])
+    feed_status = snap.get("feed_status") or snap.get("market_data_state")
+
+    if price is None or feed_status in ("ERROR", "UNAVAILABLE"):
+        return {
+            "side": "FLAT",
+            "score": 0.0,
+            "tags": ["NO_QUOTE", "FEED_ERROR"],
+            "stop": None,
+            "target": None,
+            "change_pct": change,
+            "price": None,
+            "available": False,
+        }
 
     score = 50.0
     tags: list[str] = []
@@ -95,8 +98,8 @@ def _bias(snap: dict[str, Any]) -> dict[str, Any]:
             tags.append("RANGE_LOW")
             score -= 5
 
-    if len(closes) >= 10:
-        mom = (closes[-1] / closes[-10] - 1.0) * 100.0 if closes[-10] else 0.0
+    if len(closes) >= 10 and closes[-10]:
+        mom = (closes[-1] / closes[-10] - 1.0) * 100.0
         score += max(-10.0, min(10.0, mom * 3.0))
         tags.append("MOM_UP" if mom > 0 else "MOM_DOWN")
 
@@ -108,6 +111,7 @@ def _bias(snap: dict[str, Any]) -> dict[str, Any]:
     else:
         side = "FLAT"
 
+    # Stops/targets are % on the *proxy* price — not MCX tick stops
     stop = target = None
     if side == "LONG" and price:
         stop = round(float(price) * 0.992, 4)
@@ -116,6 +120,7 @@ def _bias(snap: dict[str, Any]) -> dict[str, Any]:
         stop = round(float(price) * 1.008, 4)
         target = round(float(price) * 0.992, 4)
 
+    tags = list(dict.fromkeys([*tags, "PROXY_TAPE", "NOT_MCX_CONTRACT"]))
     return {
         "side": side,
         "score": score,
@@ -123,63 +128,148 @@ def _bias(snap: dict[str, Any]) -> dict[str, Any]:
         "stop": stop,
         "target": target,
         "change_pct": change,
-        "price": price,
+        "price": float(price) if price is not None else None,
+        "available": True,
+    }
+
+
+def _instrument_public(inst: dict[str, Any]) -> dict[str, Any]:
+    related = list(inst.get("related_mcx_symbols") or [])
+    return {
+        "id": inst["id"],
+        "name": inst["name"],
+        "yahoo": inst["yahoo"],
+        "yahoo_symbol": inst["yahoo"],
+        "instrument_class": inst["instrument_class"],
+        "is_mcx_listed": False,
+        "provider": inst["provider"],
+        "venue_proxy": inst["venue_proxy"],
+        "currency": inst["currency"],
+        "unit": inst["unit"],
+        "price_scale": inst["price_scale"],
+        "price_kind": inst["price_kind"],
+        "related_mcx_symbols": related,
+        "mcx_hint": (
+            f"Related MCX names (unvalidated): {' / '.join(related)}"
+            if related
+            else "FX context only — not an MCX commodity"
+        ),
+        "mcx_mapping_status": inst["mcx_mapping_status"],
+        "quote_hours_note": inst["quote_hours_note"],
+        "expiry_note": inst["expiry_note"],
+        "roll_note": inst["roll_note"],
+        "lot_sizing": inst["lot_sizing"],
+        "group": inst["group"],
+        "display_label": (
+            "GLOBAL FUTURES PROXY"
+            if inst["instrument_class"] == "global_futures_proxy"
+            else "FX CONTEXT"
+        ),
+        "expectancy_eligible": False,
+        "expectancy_note": (
+            "No expectancy / STRONG gate — proxy tape and costs are not "
+            "MCX-contract walk-forward."
+        ),
     }
 
 
 def build_mcx_desk() -> dict[str, Any]:
-    snaps = live_quotes.fetch_many([c["yahoo"] for c in COMMODITIES])
+    snaps = live_quotes.fetch_many([c["yahoo"] for c in INSTRUMENTS])
     rows: list[dict[str, Any]] = []
-    for c in COMMODITIES:
-        snap = snaps.get(c["yahoo"])
-        if not snap:
+
+    for inst in INSTRUMENTS:
+        meta = _instrument_public(inst)
+        raw = snaps.get(inst["yahoo"])
+        snap = _snap_to_dict(raw)
+        if not snap or snap.get("price") is None:
             rows.append(
                 {
-                    **c,
+                    **meta,
                     "side": "FLAT",
                     "score": 0,
-                    "thesis": "Quote unavailable",
+                    "thesis": (
+                        f"{meta['display_label']}: quote unavailable "
+                        f"({inst['yahoo']}) — research tape offline"
+                    ),
                     "price": None,
-                    "tags": ["NO_QUOTE"],
+                    "tags": ["NO_QUOTE", "PROXY_UNAVAILABLE", "NOT_MCX_CONTRACT"],
+                    "available": False,
+                    "stop": None,
+                    "target": None,
+                    "change_pct": None,
+                    "feed_status": (snap or {}).get("feed_status") or "UNAVAILABLE",
+                    "market_data_state": (snap or {}).get("market_data_state"),
+                    "quote_source": (snap or {}).get("source") or "yahoo_chart",
                 }
             )
             continue
+
         bias = _bias(snap)
+        # Enforce registry currency/unit — never inherit a misleading INR from feed
+        currency = meta["currency"]
+        scale = float(meta["price_scale"] or 1.0)
+        px = bias["price"]
+        if px is not None and scale != 1.0:
+            px = round(float(px) * scale, 6)
+            bias["price"] = px
+            if bias.get("stop") is not None:
+                bias["stop"] = round(float(bias["stop"]) * scale, 6)
+            if bias.get("target") is not None:
+                bias["target"] = round(float(bias["target"]) * scale, 6)
+
+        chg = bias.get("change_pct")
         thesis = (
-            f"{bias['side']} · {c['name']} @ {bias['price']} {c['unit']} "
-            f"({bias['change_pct']:+.2f}%)" if bias.get("change_pct") is not None
-            else f"{bias['side']} · {c['name']}"
+            f"{bias['side']} bias on {meta['display_label']} · {meta['name']} "
+            f"@ {px} {meta['unit']}"
+            + (f" ({chg:+.2f}%)" if chg is not None else "")
+            + " — not an INR MCX contract"
         )
         rows.append(
             {
-                **c,
+                **meta,
                 **bias,
                 "thesis": thesis,
-                "currency": snap.get("currency"),
-                "exchange": snap.get("exchange"),
+                "currency": currency,
+                "exchange": snap.get("exchange") or meta["venue_proxy"],
                 "session_high": snap.get("session_high"),
                 "session_low": snap.get("session_low"),
-                "yahoo_symbol": c["yahoo"],
+                "feed_status": snap.get("feed_status"),
+                "market_data_state": snap.get("market_data_state"),
+                "quote_source": snap.get("source") or "yahoo_chart",
+                "quote_age_sec": snap.get("age_sec"),
+                "is_current_live": False,  # never broker MCX LIVE
+                "provenance": "fallback",
+                "provider_class": "research_fallback",
             }
         )
 
     rows.sort(key=lambda r: float(r.get("score") or 0), reverse=True)
-    actionable = [r for r in rows if r.get("side") in ("LONG", "SHORT") and r.get("id") != "USDINR"]
+    actionable = [
+        r
+        for r in rows
+        if r.get("side") in ("LONG", "SHORT")
+        and r.get("id") != "USDINR"
+        and r.get("available", True)
+    ]
 
     return {
         "desk": "mcx",
+        "desk_mode": "global_futures_proxy_research",
         "as_of": datetime.now(timezone.utc).isoformat(),
         "poll_seconds": 15,
         "count": len(rows),
         "signals": rows,
         "actionable": actionable,
+        "instrument_catalog": public_catalog(),
+        "expectancy_gated": False,
+        "expectancy_note": (
+            "Expectancy / STRONG badges disabled for this desk — "
+            "data is a global proxy, not MCX contract walk-forward."
+        ),
         "message": (
-            "Global futures tape as directional research for MCX majors "
-            "(Gold, Silver, Crude, NatGas, Copper) + USDINR context. "
-            "Map to the front-month MCX contract yourself — lots/margins differ."
+            "Global futures / FX research tape (Yahoo). Not exchange-listed "
+            "MCX INR contracts. Related MCX names are unvalidated hints only. "
+            "No lot sizing or order instructions."
         ),
-        "disclaimer": (
-            "Commodities are leveraged and can gap. Research only — not MCX advice. "
-            "Confirm contract, lot size, and margin with your broker before any order."
-        ),
+        "disclaimer": DESK_DISCLAIMER,
     }

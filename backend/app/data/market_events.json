@@ -1,0 +1,13 @@
+{
+  "source_id": "operator_market_events",
+  "source_label": "Operator-maintained market events snapshot",
+  "source_url": null,
+  "license": "Operator-compiled for personal research use only. Do not redistribute as an official calendar. Each entry must cite a public primary source; this desk does not scrape third-party economic calendars.",
+  "license_note": "No third-party commercial calendar license is claimed. Add only scheduled facts or reported outcomes transcribed from primary public notices (e.g. RBI press releases, NSE circulars) with a source_url. Verify against the cited source before relying on timing.",
+  "as_of": "2026-10-26",
+  "last_updated": "2026-10-26T10:00:00+05:30",
+  "timezone": "Asia/Kolkata",
+  "stale_after_days": 45,
+  "events": [],
+  "limitation": "Events array is intentionally empty until the operator adds verified primary-source rows. The desk will not invent dates, forecasts, outcomes, or market impact. NSE cash holidays come from nse_holidays.json separately."
+}

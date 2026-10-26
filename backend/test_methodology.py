@@ -65,11 +65,11 @@ class MethodologyTests(unittest.TestCase):
                 "reli",
                 cat,
                 {"rsi_14": 50},
-                data_mode="demo",
+                data_mode="delayed",
             )
             self.assertEqual(out["symbol"], "RELI")
             self.assertEqual(out["timeframe"], tf)
-            self.assertEqual(out["data_mode"], "demo")
+            self.assertEqual(out["data_mode"], "delayed")
             self.assertIn("not performance-verified", out["risk_notes"].lower())
             self.assertEqual(out["direction"], "none")
 

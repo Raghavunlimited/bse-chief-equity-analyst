@@ -21,7 +21,7 @@ Run against local stack (API `:8000`, UI via `start.sh` / CRA proxy). Mark each 
 
 | # | Step | Expect | P/F |
 |---|------|--------|-----|
-| B1 | Land on Swing | Hero “This week’s setups”, week label (e.g. `2026-W43`), regime chip | |
+| B1 | Land on Swing | Hero “This week’s setups”, calendar week label (e.g. `2026-W44`), regime chip; optional “data W43” if EOD as-of differs | |
 | B2 | Regime / provenance / stale chips | Click chip → explanation panel; demo vs Kotak honest | |
 | B3 | CapitalDesk: set capital ₹5L, risk 1%, target 3%, Apply | Desk reloads; risk ₹ and target ₹ update | |
 | B4 | Raise target % to unreachable (e.g. 15%) | Planner shows not reachable / caution — no fake promise | |

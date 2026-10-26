@@ -116,11 +116,18 @@ def stock_detail(symbol: str):
         if symbol not in listed and symbol not in set(db.get_all_symbols()):
             raise HTTPException(404, f"Unknown symbol {symbol}")
 
+    if latest is not None:
+        latest = {
+            **latest,
+            "price_kind": "eod_close",
+            "note": "Kotak/Yahoo EOD settlement close — not live LTP",
+        }
     return {
         "symbol": symbol,
         "sector": SECTOR_MAP.get(symbol, "Unknown"),
         "has_eod": latest is not None,
         "latest": latest,
+        "price_kind": "eod_close" if latest is not None else None,
         "indicators": indicators,
         "fundamentals": fundamentals,
     }
@@ -135,24 +142,90 @@ def stock_fundamentals(
 
 
 @router.get("/chart/{symbol}")
-def chart(symbol: str, days: int = Query(90, ge=20, le=500)):
-    symbol = symbol.upper()
-    hist = db.get_symbol_history(symbol, lookback=days)
-    if hist.empty:
-        return {"symbol": symbol, "bars": [], "has_eod": False}
-    bars = []
-    for _, r in hist.iterrows():
-        bars.append(
+def chart(
+    symbol: str,
+    days: int = Query(90, ge=20, le=500),
+    interval: str = Query(
+        "1d",
+        description="1m | 5m | 15m | 1h | 1d — Phase 4 workstation timeframes",
+    ),
+    limit: int = Query(300, ge=20, le=2000),
+):
+    """
+    Multi-timeframe OHLCV (+ OI when streamed) for the Lightweight Charts workstation.
+
+    ``days`` retained for back-compat on daily charts (maps to limit when interval=1d).
+    """
+    from app.chart_data import build_chart_payload
+
+    symbol = symbol.upper().strip()
+    iv = (interval or "1d").lower().strip()
+    lim = days if iv == "1d" and limit == 300 else limit
+    if iv == "1d":
+        lim = max(days, 20)
+    try:
+        payload = build_chart_payload(symbol, interval=iv, limit=lim)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    # Back-compat fields for any legacy ProStockChart consumers
+    legacy_bars = []
+    for b in payload.get("bars") or []:
+        legacy_bars.append(
             {
-                "date": str(r["trade_date"]),
-                "open": float(r["open"]),
-                "high": float(r["high"]),
-                "low": float(r["low"]),
-                "close": float(r["close"]),
-                "volume": float(r["volume"]),
+                "date": b["time"] if isinstance(b["time"], str) else str(b["time"]),
+                "open": b["open"],
+                "high": b["high"],
+                "low": b["low"],
+                "close": b["close"],
+                "volume": b["volume"],
+                "sma20": None,
+                "sma50": None,
             }
         )
-    return {"symbol": symbol, "bars": bars, "has_eod": True}
+    # Attach SMA20/50 onto legacy daily bars from EMA ribbon when present
+    ribbon = payload.get("ema_ribbon") or {}
+    if iv == "1d" and ribbon.get("ema21"):
+        by_t = {x["time"]: x["value"] for x in ribbon.get("ema21") or []}
+        by_t50 = {x["time"]: x["value"] for x in ribbon.get("ema50") or []}
+        for row in legacy_bars:
+            row["sma20"] = by_t.get(row["date"])
+            row["sma50"] = by_t50.get(row["date"])
+
+    overlays = ["ema9", "ema21", "ema50", "ema200", "pdh_pdl_pdc"]
+    if iv != "1d":
+        overlays.append("vwap")
+    opt = payload.get("optional_features") or {}
+    if (opt.get("walls") or {}).get("available"):
+        overlays.append("walls")
+    if (opt.get("oi") or {}).get("available"):
+        overlays.append("oi")
+
+    return {
+        **payload,
+        "bars_legacy": legacy_bars,
+        "has_eod": bool(payload.get("has_data") and iv == "1d"),
+        "range_days": days if iv == "1d" else None,
+        "overlays": overlays,
+        "overlays_note": (
+            "walls/oi listed only when optional_features mark them available; "
+            "never inferred."
+        ),
+    }
+
+
+@router.get("/chart/{symbol}/live")
+def chart_live(
+    symbol: str,
+    interval: str = Query("5m", description="1m | 5m | 15m | 1h | 1d"),
+):
+    """Latest bar + LTP for lightweight-charts series.update() polling."""
+    from app.chart_data import live_bar_update
+
+    try:
+        return live_bar_update(symbol.upper().strip(), interval=interval)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 @router.get("/stocks/search")

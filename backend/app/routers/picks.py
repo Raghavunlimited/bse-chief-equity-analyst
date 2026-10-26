@@ -63,7 +63,9 @@ def weekly_picks(
     freshness = db.freshness(config.max_data_age_days)
     provenance = data_provenance(config.db_path)
     as_of_date = as_of or freshness.get("latest_date")
-    week = iso_week_label(as_of_date)
+    as_of_week = iso_week_label(as_of_date)
+    calendar_week = iso_week_label(None)
+    week = calendar_week
     if not as_of_date:
         empty = {
             "status": "empty",
@@ -71,6 +73,8 @@ def weekly_picks(
             "provenance": provenance,
             "candidates": [],
             "week_label": week,
+            "calendar_week_label": calendar_week,
+            "as_of_week_label": as_of_week,
             "message": "No data — run Refresh data",
         }
         if target_gain_pct is not None:
@@ -111,6 +115,8 @@ def weekly_picks(
     )
     result["provenance"] = provenance
     result["week_label"] = week
+    result["calendar_week_label"] = calendar_week
+    result["as_of_week_label"] = as_of_week
 
     if fundamentals and result.get("candidates"):
         batch = fetch_fundamentals_many(

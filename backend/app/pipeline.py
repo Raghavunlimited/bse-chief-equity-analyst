@@ -40,9 +40,58 @@ def run_incremental_ingest(
     db: Optional[Database] = None,
     *,
     force_full: bool = False,
+    trigger: str = "manual",
+    target_session: str | None = None,
 ) -> dict[str, Any]:
+    """
+    Idempotent EOD refresh. Safe to retry.
+
+    ``trigger``: manual | schedule | cli
+    ``target_session``: YYYY-MM-DD expected session (schedule); optional for manual.
+    """
+    from app.ingest_journal import begin_run, finish_run, last_successful_for_session
+    from app.nse_calendar import expected_eod_as_of, load_holiday_dates
+
     reset_progress()
     db = db or Database(config.db_path)
+    holidays, _ = load_holiday_dates()
+    expected = expected_eod_as_of(holidays=holidays).isoformat()
+    target = target_session or expected
+
+    # Scheduled idempotency: already have success for this session
+    if trigger == "schedule" and not force_full:
+        prior = last_successful_for_session(target)
+        if prior:
+            freshness = db.freshness(config.max_data_age_days)
+            result = {
+                "status": "ok",
+                "source": prior.get("provider") or "cache",
+                "eod_rows": 0,
+                "dates_ingested": [],
+                "nifty_rows": 0,
+                "indicator_rows": 0,
+                "freshness": freshness,
+                "provenance": data_provenance(config.db_path),
+                "target_session": target,
+                "trigger": trigger,
+                "skipped": True,
+                "message": (
+                    f"Skip — ingest already succeeded for session {target} "
+                    f"(run #{prior.get('id')})."
+                ),
+            }
+            finish_progress(result)
+            return result
+
+    run_id = begin_run(
+        trigger=trigger,
+        target_session=target,
+        requested_from=db.get_max_trade_date(),
+        requested_to=target,
+        provider=None,
+        meta={"force_full": force_full},
+    )
+
     try:
         last = db.get_max_trade_date()
         freshness = db.freshness(config.max_data_age_days)
@@ -74,11 +123,23 @@ def run_incremental_ingest(
                 "indicator_rows": 0,
                 "freshness": freshness,
                 "provenance": data_provenance(config.db_path),
+                "target_session": target,
+                "trigger": trigger,
                 "message": (
                     "Data already fresh — light refresh only. "
                     f"NSE new rows={rows}, NIFTY rows={nifty_rows}."
                 ),
             }
+            finish_run(
+                run_id,
+                status="ok" if freshness.get("status") in ("FRESH", "RECENT") else "ok",
+                provider=result["source"],
+                eod_rows=rows,
+                nifty_rows=nifty_rows,
+                dates_ingested=dates,
+                freshness=freshness,
+                message=result["message"],
+            )
             finish_progress(result)
             return result
 
@@ -253,14 +314,37 @@ def run_incremental_ingest(
             "indicator_rows": ind_rows,
             "freshness": freshness,
             "provenance": data_provenance(config.db_path),
+            "target_session": target,
+            "trigger": trigger,
             "message": (
                 f"Source={source}; {rows} EOD rows, {nifty_rows} NIFTY rows, "
                 f"{ind_rows} indicators"
             ),
         }
+        finish_run(
+            run_id,
+            status="ok",
+            provider=source,
+            eod_rows=rows,
+            nifty_rows=nifty_rows,
+            indicator_rows=ind_rows,
+            dates_ingested=dates,
+            freshness=freshness,
+            message=result["message"],
+        )
         finish_progress(result)
         return result
     except Exception as e:
         logger.exception("ingest failed")
+        try:
+            finish_run(
+                run_id,
+                status="error",
+                error=str(e)[:500],
+                message=str(e)[:240],
+                freshness=db.freshness(config.max_data_age_days),
+            )
+        except Exception:  # noqa: BLE001
+            pass
         finish_progress(error=str(e))
         raise

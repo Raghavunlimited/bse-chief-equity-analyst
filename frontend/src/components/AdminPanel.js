@@ -7,7 +7,7 @@ const empty = {
   direction: 'none',
   timeframe: '1w',
   rationale: '',
-  data_mode: 'demo',
+  data_mode: 'delayed',
   expires_in_hours: 168,
 };
 
@@ -123,7 +123,6 @@ export default function AdminPanel({ open, onClose }) {
               value={form.data_mode}
               onChange={(e) => setForm({ ...form, data_mode: e.target.value })}
             >
-              <option value="demo">demo</option>
               <option value="delayed">delayed</option>
               <option value="stale">stale</option>
               <option value="live">live</option>

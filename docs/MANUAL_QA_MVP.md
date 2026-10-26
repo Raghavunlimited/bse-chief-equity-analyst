@@ -17,4 +17,4 @@ Browser + API pass (2026-10-24, localhost:3000 / :8000 v4.0.0):
 
 Notes:
 - Fixed SettingsDrawer falsely marking vault configured when only model prefs saved.
-- CRA `HOST=127.0.0.1` fails `allowedHosts`; start FE without `HOST` or with `DANGEROUSLY_DISABLE_HOST_CHECK`.
+- CRA `HOST=127.0.0.1` needs `DANGEROUSLY_DISABLE_HOST_CHECK=true` (set in `frontend/.env.development` + `start.sh`) — otherwise webpack-dev-server errors on empty `allowedHosts`.
