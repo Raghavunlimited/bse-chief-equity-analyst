@@ -75,6 +75,45 @@ class ClassifyBoardTests(unittest.TestCase):
         self.assertEqual(avail["code"], NO_QUALIFYING)
         self.assertIn("strategy", avail["label"].lower())
 
+    def test_cash_regime_not_gate_blocked_when_expectancy_fails_on_holds(self):
+        """Live swing path attaches edge_unproven on cash HOLDs — still no_qualifying."""
+        board = {
+            "desk": "swing",
+            "status": "cash",
+            "message": "NIFTY below SMA50 — no new swings",
+            "data_status": {"status": "FRESH", "latest_date": "2026-10-26"},
+            "calls": [
+                {
+                    "symbol": "NIFTY",
+                    "side": "HOLD",
+                    "tags": ["CASH", "CASH_WEEK", "REGIME_BEAR", "NO_CANDIDATE"],
+                    "expectancy": {
+                        "status_label": "edge_unproven",
+                        "gates": {
+                            "passed": False,
+                            "fail_reasons": ["N<30 (got 0)", "E≤0.25R (got None)"],
+                        },
+                    },
+                },
+                {
+                    "symbol": "PERSISTENT",
+                    "side": "HOLD",
+                    "tags": ["REGIME_BEAR", "CASH", "NO_NEW_BUY", "BEAR_GATE", "RADAR"],
+                    "expectancy": {
+                        "status_label": "edge_unproven",
+                        "gates": {
+                            "passed": False,
+                            "fail_reasons": ["N<30 (got 0)"],
+                        },
+                    },
+                },
+            ],
+        }
+        avail = summarize_board_availability(board)
+        self.assertEqual(avail["code"], NO_QUALIFYING)
+        self.assertEqual(avail["actionable_count"], 0)
+        self.assertIn("NIFTY below SMA50", avail["detail"])
+
     def test_data_blocked_stale_eod(self):
         board = {
             "desk": "swing",

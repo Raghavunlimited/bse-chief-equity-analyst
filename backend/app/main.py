@@ -37,7 +37,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
-APP_VERSION = "5.12.4-api-key-evaluate"
+APP_VERSION = "5.12.5-signal-clarity"
 
 _docs = "/docs" if config.enable_api_docs else None
 _redoc = "/redoc" if config.enable_api_docs else None
