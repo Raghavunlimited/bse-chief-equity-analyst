@@ -109,7 +109,11 @@ export default function MarketEventsCalendar() {
             <p className="banner warn" data-testid="events-stale-banner">
               STALE calendar data — not a current NSE / operator feed. Dates below
               remain listed for research but must not be treated as a verified current
-              circular. Refresh only after operator verification of the primary source.
+              circular. To refresh: verify the latest NSE cash-market holiday circular,
+              then update <code>backend/app/data/nse_holidays.json</code> (and optional{' '}
+              <code>market_events.json</code>) including a new operator-verified{' '}
+              <code>as_of</code>. Do not bump <code>as_of</code> without that check —
+              stale stays labeled stale on purpose.
             </p>
           ) : null}
         </div>

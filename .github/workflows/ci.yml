@@ -48,6 +48,8 @@ jobs:
           python test_position_sizing.py
           python test_market_events.py
           python test_strategy_evaluation.py
+          python test_signal_availability.py
+          python test_kotak_adapter_contract.py
           python test_crypto_adapters.py
           python test_mvp_platform.py
           python test_analyze_validation.py

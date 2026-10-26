@@ -80,7 +80,9 @@ export default function AdminPanel({ open, onClose }) {
           </button>
         </header>
         <p className="admin-disclosure">
-          Changes are audited. Prefer data_mode=demo unless a live provider is wired and verified.
+          Optional research notes for the Signal ledger only — desk boards do not auto-publish
+          here. Use data_mode live / delayed / eod (demo rows are hidden from the ledger).
+          Changes are audited. Research only — not orders.
         </p>
         {msg ? <p className="admin-ok">{msg}</p> : null}
         {err ? <p className="auth-error">{String(err)}</p> : null}

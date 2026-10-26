@@ -49,9 +49,10 @@ export default function SignalHistory({ category, onOpen }) {
         </label>
       </div>
       <p className="signal-history__note">
-        Admin-published research notes only (append-only). Consultant desk calls
-        are not auto-written here. Revisions create a new record; prior rows stay
-        for audit. Research only — not orders.
+        Optional journal of notes you (or an admin) publish manually — not an automatic
+        feed of desk research cards. Swing / Intraday / Index / MCX boards stay on their
+        own tabs. Demo rows are hidden. Research only — not orders and not a return
+        guarantee.
       </p>
       {loading ? <p className="empty-state">Loading ledger…</p> : null}
       {error ? <p className="auth-error">{error}</p> : null}

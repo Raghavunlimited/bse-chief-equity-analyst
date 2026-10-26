@@ -128,6 +128,16 @@ class Config:
         "JURISDICTION_NOTE",
         "Research tooling only. Not registered investment advice in any jurisdiction.",
     )
+    # Local OpenAI-compatible LLM (Ollama / LM Studio) — loopback only.
+    # Example Ollama: http://127.0.0.1:11434/v1
+    # Example LM Studio: http://127.0.0.1:1234/v1
+    local_llm_base_url: str = (
+        os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434/v1").strip()
+        or "http://127.0.0.1:11434/v1"
+    )
+    local_llm_default_model: str = (
+        os.getenv("LOCAL_LLM_DEFAULT_MODEL", "llama3.2").strip() or "llama3.2"
+    )
 
     def cors_origin_list(self) -> list[str]:
         """Phase 7: never default to ``*`` for auth-off personal desk."""

@@ -104,6 +104,10 @@ export default function SettingsDrawer({ open, onClose, onSaved }) {
         setApiKey('');
         configured = true;
         setMsg('Key saved encrypted on server. It will not be shown again.');
+      } else if (provider === 'local') {
+        setMsg(
+          'Local model preference saved. No cloud key needed — start Ollama/LM Studio on LOCAL_LLM_BASE_URL.',
+        );
       } else {
         setMsg('Model preference saved. Enter a key to update the vault.');
       }
@@ -163,8 +167,11 @@ export default function SettingsDrawer({ open, onClose, onSaved }) {
 
         <p className="settings-drawer__note">
           Keys are <strong>never returned</strong> to the browser after save. Analysis runs
-          only when you explicitly click Analyze. AI output is commentary, not an
-          authoritative signal.
+          only when you explicitly click Explain. AI output is commentary, not an
+          authoritative signal. For <strong>local</strong> models (Ollama / LM Studio),
+          pick a Local · entry in the model list — no cloud key needed; set{' '}
+          <code>LOCAL_LLM_BASE_URL</code> in <code>backend/.env</code> if not using the
+          Ollama default.
         </p>
 
         <p className="settings-drawer__vault" role="status">
@@ -199,10 +206,13 @@ export default function SettingsDrawer({ open, onClose, onSaved }) {
               placeholder={
                 vault.configured
                   ? '•••••••• (enter new key to replace)'
-                  : provider === 'anthropic'
-                    ? 'sk-ant-…'
-                    : 'sk-…'
+                  : provider === 'local'
+                    ? 'optional for local (leave blank)'
+                    : provider === 'anthropic'
+                      ? 'sk-ant-…'
+                      : 'sk-…'
               }
+              disabled={provider === 'local'}
               autoComplete="off"
               spellCheck={false}
               aria-label="LLM API key"

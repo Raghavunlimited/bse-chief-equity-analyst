@@ -185,20 +185,9 @@ class ApiIntegrationTests(unittest.TestCase):
         from fastapi.testclient import TestClient
 
         from app.main import APP_VERSION, app
+        from app.version_assert import minor_at_least
 
-        self.assertTrue(
-            "options-oi" in APP_VERSION
-            or "trade-journal" in APP_VERSION
-            or "position-sizing" in APP_VERSION
-            or "market-events" in APP_VERSION
-            or "strategy-eval" in APP_VERSION
-            or APP_VERSION.startswith("5.8")
-            or APP_VERSION.startswith("5.9")
-            or APP_VERSION.startswith("5.10")
-            or APP_VERSION.startswith("5.11")
-            or APP_VERSION.startswith("5.12"),
-            APP_VERSION,
-        )
+        self.assertTrue(minor_at_least(APP_VERSION, 8), APP_VERSION)
         eng = MagicMock()
         eng.status.return_value = {"active": False}
         with patch("app.kotak.option_chain.get_option_chain_engine", return_value=eng):

@@ -81,6 +81,46 @@ class AnalyzeValidationTests(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 422)
 
+    def test_local_provider_no_key_mocked(self):
+        fake = {
+            "summary": "local ok",
+            "bull_case": "b",
+            "bear_case": "c",
+            "risks": "r",
+            "checklist": ["check"],
+            "provider": "local",
+            "model": "llama3.2",
+            "local_base_host": "loopback",
+        }
+        with patch("app.routers.analyze.analyze_signal", return_value=fake) as mock_fn:
+            r = client.post(
+                "/api/analyze",
+                json={
+                    "provider": "local",
+                    "model": "llama3.2",
+                    "signal": {"symbol": "INFY", "side": "HOLD"},
+                    "use_stored_key": False,
+                },
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["analysis"]["provider"], "local")
+        self.assertNotIn("api_key", r.json())
+        mock_fn.assert_called_once()
+        self.assertEqual(mock_fn.call_args.args[1], "local")
+        base = mock_fn.call_args.kwargs.get("local_base_url") or ""
+        self.assertTrue(base.startswith("http://127.0.0.1") or "localhost" in base)
+
+    def test_local_base_url_rejects_non_loopback(self):
+        from app.llm_analyze import LlmAnalyzeError, assert_loopback_base_url
+
+        with self.assertRaises(LlmAnalyzeError):
+            assert_loopback_base_url("http://example.com/v1")
+        with self.assertRaises(LlmAnalyzeError):
+            assert_loopback_base_url("http://10.0.0.2:11434/v1")
+        self.assertTrue(
+            assert_loopback_base_url("http://127.0.0.1:11434/v1").startswith("http://127.0.0.1")
+        )
+
     def test_signal_too_large_422(self):
         big = {"blob": "x" * 40_000}
         r = client.post(

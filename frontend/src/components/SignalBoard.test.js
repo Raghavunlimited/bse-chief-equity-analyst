@@ -34,7 +34,9 @@ describe('SignalBoard', () => {
     );
     expect(screen.getByText('BUY')).toBeInTheDocument();
     expect(screen.getByText('RELIANCE')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /analyze with llm/i }));
+    fireEvent.click(
+      screen.getByRole('button', { name: /explain with llm \(does not change this card\)/i }),
+    );
     expect(onAnalyze).toHaveBeenCalledTimes(1);
   });
 
