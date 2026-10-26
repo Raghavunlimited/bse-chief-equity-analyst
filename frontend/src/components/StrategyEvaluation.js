@@ -91,6 +91,9 @@ export default function StrategyEvaluation() {
       {data?.universe_honesty ? (
         <p className="banner warn" role="note" data-testid="eval-universe-honesty">
           {data.universe_honesty}
+          {data.pit_universe_available === false
+            ? ' Point-in-time universe: not available in this desk.'
+            : ''}
         </p>
       ) : null}
 

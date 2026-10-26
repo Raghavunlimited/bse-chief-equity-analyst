@@ -32,7 +32,7 @@ describe('ExpectancyHonestyBanner', () => {
     );
   });
 
-  test('hidden when not prominent or wrong desk', () => {
+  test('renders on swing; hidden when not prominent or MCX', () => {
     const { rerender } = render(
       <ExpectancyHonestyBanner
         desk="intraday"
@@ -42,7 +42,10 @@ describe('ExpectancyHonestyBanner', () => {
     expect(screen.queryByTestId('expectancy-honesty')).not.toBeInTheDocument();
 
     rerender(<ExpectancyHonestyBanner desk="swing" honesty={honesty} />);
-    expect(screen.queryByTestId('expectancy-honesty')).not.toBeInTheDocument();
+    expect(screen.getByTestId('expectancy-honesty')).toHaveAttribute(
+      'data-desk',
+      'swing',
+    );
 
     rerender(<ExpectancyHonestyBanner desk="mcx" honesty={honesty} />);
     expect(screen.queryByTestId('expectancy-honesty')).not.toBeInTheDocument();

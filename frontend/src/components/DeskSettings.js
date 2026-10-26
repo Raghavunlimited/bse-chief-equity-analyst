@@ -42,7 +42,8 @@ export default function DeskSettings({ open, onClose }) {
           </button>
         </header>
         <p className="section-sub">
-          Optional BYO LLM key for <em>Analyze with LLM</em> on consultant calls. Stored
+          Optional BYO LLM key for <em>Explain with LLM</em> on existing consultant cards
+          (explain-only — never creates or changes a signal). Stored
           only in this browser; sent to our API solely when you click Analyze (then
           forwarded to the provider — never logged).
         </p>
