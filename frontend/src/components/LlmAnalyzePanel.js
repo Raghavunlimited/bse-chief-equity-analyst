@@ -9,6 +9,7 @@ import { LLM_MODEL_STORAGE, LLM_PROVIDER_STORAGE } from './SettingsDrawer';
 
 /**
  * Optional LLM research panel. Prefers server vault; optional one-shot key in body.
+ * Explain-only: never creates, upgrades, or alters a strategy signal.
  */
 export default function LlmAnalyzePanel({ signal, context, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -102,8 +103,10 @@ export default function LlmAnalyzePanel({ signal, context, defaultOpen = false }
       {open && (
         <div className="llm-panel__body">
           <p className="muted">
-            Explicit opt-in. Output is AI commentary citing your signal JSON — not an
-            authoritative signal. Vault configured: {vaultOk ? 'yes' : 'no'}.
+            Explicit opt-in. The model may only explain this existing research card and
+            must disclose missing or stale inputs. It cannot create, upgrade, or change
+            BUY/SELL/HOLD. Not an order and not a return guarantee. Vault configured:{' '}
+            {vaultOk ? 'yes' : 'no'}.
           </p>
           <label className="settings-drawer__field">
             <span>Model</span>
@@ -135,7 +138,7 @@ export default function LlmAnalyzePanel({ signal, context, defaultOpen = false }
             </label>
           )}
           <button type="button" className="btn primary" onClick={run} disabled={loading}>
-            {loading ? 'Analyzing…' : 'Analyze with LLM'}
+            {loading ? 'Explaining…' : 'Explain card (LLM — explain only)'}
           </button>
           {error ? <p className="auth-error">{error}</p> : null}
           {result ? (

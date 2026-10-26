@@ -21,6 +21,7 @@ import AuthGate from './components/AuthGate';
 import AdminPanel from './components/AdminPanel';
 import SignalHistory from './components/SignalHistory';
 import SignalAvailabilityBanner from './components/SignalAvailabilityBanner';
+import ExpectancyHonestyBanner from './components/ExpectancyHonestyBanner';
 import ProvenanceBadge from './components/ProvenanceBadge';
 import MarketSessionBanner from './components/MarketSessionBanner';
 import { isoWeekLabel } from './isoWeek';
@@ -478,9 +479,17 @@ export default function App() {
           )}
         </div>
         <div className="nav-actions">
-          {authUser?.role === 'admin' && authUser?.email !== 'operator@local' ? (
-            <button type="button" className="btn ghost" onClick={() => setAdminOpen(true)}>
-              Admin
+          {authUser &&
+          (authUser.auth_enabled === false ||
+            (authUser.role === 'admin' &&
+              authUser.email !== 'operator@local')) ? (
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => setAdminOpen(true)}
+              title="Publish optional research notes to the Signal ledger (not desk auto-feed)"
+            >
+              Publish notes
             </button>
           ) : null}
           <button
@@ -919,9 +928,13 @@ export default function App() {
           ((swingCalls.signals || swingCalls.calls)?.length > 0 ||
             swingCalls.signal_availability) && (
           <section className="section consultant-swing" id="section-consultant-swing">
+            <ExpectancyHonestyBanner
+              desk="swing"
+              honesty={swingCalls.expectancy_honesty}
+            />
             <SignalBoard
               title="Weekly consultant calls"
-              subtitle="BUY / SELL / HOLD from the consultant desk — research math, not tips."
+              subtitle="Deterministic research cards from the swing strategy — not tips, not the Signal ledger."
               signals={swingCalls.signals || swingCalls.calls}
               desk="swing"
               source={swingCalls._source || 'consultant'}
@@ -934,6 +947,7 @@ export default function App() {
             )}
           </section>
         )}
+
         {swingCallsErr && (
           <p className="muted consultant-swing__miss">
             Consultant swing feed unavailable — using classic picks above.

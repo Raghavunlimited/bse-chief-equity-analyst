@@ -1,13 +1,14 @@
 import React from 'react';
 
 /**
- * Desk-level prominence for Index / Intraday expectancy honesty.
- * Does not create signals — surfaces proxy / thin 5m history / gate fails.
+ * Desk-level prominence for Swing / Index / Intraday expectancy honesty.
+ * Does not create signals — surfaces proxy / thin history / gate fails.
+ * MCX stays off this banner (proxy desk has its own labels).
  */
 export default function ExpectancyHonestyBanner({ honesty, desk }) {
   if (!honesty || !honesty.prominent) return null;
   const d = String(desk || '').toLowerCase();
-  if (d && d !== 'intraday' && d !== 'index') return null;
+  if (d && d !== 'intraday' && d !== 'index' && d !== 'swing') return null;
 
   return (
     <div
