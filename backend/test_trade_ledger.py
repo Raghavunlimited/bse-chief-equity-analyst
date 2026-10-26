@@ -229,18 +229,9 @@ class ApiPrivacyTests(unittest.TestCase):
         from fastapi.testclient import TestClient
 
         from app.main import APP_VERSION, app
+        from app.version_assert import minor_at_least
 
-        self.assertTrue(
-            "trade-journal" in APP_VERSION
-            or "position-sizing" in APP_VERSION
-            or "market-events" in APP_VERSION
-            or "strategy-eval" in APP_VERSION
-            or APP_VERSION.startswith("5.9")
-            or APP_VERSION.startswith("5.10")
-            or APP_VERSION.startswith("5.11")
-            or APP_VERSION.startswith("5.12"),
-            APP_VERSION,
-        )
+        self.assertTrue(minor_at_least(APP_VERSION, 9), APP_VERSION)
         c = TestClient(app)
         h = c.get("/api/health").json()
         blob = str(h)

@@ -35,10 +35,14 @@ DISCLAIMER = (
 )
 
 # Swing walk-forward reads the symbols currently stored for each as_of date.
-# There is no point-in-time membership list in this desk.
+# There is no point-in-time membership list in this desk — PIT handling is NOT implemented.
 UNIVERSE_HONESTY = (
-    "The swing walk-forward universe is the current stored list, so delisted names are absent."
+    "Survivorship limitation (not mitigated): the swing walk-forward universe is the "
+    "current stored symbol list. Delisted names are absent. Point-in-time membership "
+    "data is not available in this desk, so reported expectancy can look optimistic "
+    "versus a true historical universe."
 )
+PIT_UNIVERSE_AVAILABLE = False
 
 STRATEGY_VERSION = "5.12.0-strategy-eval"
 
@@ -726,6 +730,8 @@ def build_evaluation_report(
         "strategy_evaluation_version": STRATEGY_VERSION,
         "disclaimer": DISCLAIMER,
         "universe_honesty": UNIVERSE_HONESTY,
+        "pit_universe_available": PIT_UNIVERSE_AVAILABLE,
+        "survivorship_bias_status": "partially_unmitigated",
         "proven": False,
         "selects_best": False,
         "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),

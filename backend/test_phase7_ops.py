@@ -120,22 +120,9 @@ class SchemaAndHealthTests(unittest.TestCase):
         from fastapi.testclient import TestClient
 
         from app.main import APP_VERSION, app
+        from app.version_assert import minor_at_least
 
-        self.assertTrue(
-            APP_VERSION.startswith("5.7")
-            or APP_VERSION.startswith("5.8")
-            or APP_VERSION.startswith("5.9")
-            or APP_VERSION.startswith("5.10")
-            or APP_VERSION.startswith("5.11")
-            or APP_VERSION.startswith("5.12")
-            or "upgrade-p7" in APP_VERSION
-            or "options-oi" in APP_VERSION
-            or "trade-journal" in APP_VERSION
-            or "position-sizing" in APP_VERSION
-            or "market-events" in APP_VERSION
-            or "strategy-eval" in APP_VERSION,
-            APP_VERSION,
-        )
+        self.assertTrue(minor_at_least(APP_VERSION, 7), APP_VERSION)
         c = TestClient(app)
         r = c.get("/api/health")
         self.assertEqual(r.status_code, 200)

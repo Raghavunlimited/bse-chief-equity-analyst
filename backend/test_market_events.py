@@ -384,14 +384,9 @@ class RealHolidayFileTests(unittest.TestCase):
 
 class ApiUiConsistencyTests(unittest.TestCase):
     def test_version_and_api_shape(self):
-        self.assertTrue(
-            "market-events" in APP_VERSION
-            or "strategy-eval" in APP_VERSION
-            or "holiday-freshness" in APP_VERSION
-            or APP_VERSION.startswith("5.11")
-            or APP_VERSION.startswith("5.12"),
-            APP_VERSION,
-        )
+        from app.version_assert import minor_at_least
+
+        self.assertTrue(minor_at_least(APP_VERSION, 11), APP_VERSION)
         c = TestClient(app)
         meta = c.get("/api/market-events/meta")
         self.assertEqual(meta.status_code, 200)

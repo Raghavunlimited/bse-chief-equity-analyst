@@ -42,6 +42,9 @@ def evaluation_meta() -> dict[str, Any]:
             "labels_proven": False,
             "oi_pcr_directional": False,
             "guarantees_returns": False,
+            "pit_universe_available": se.PIT_UNIVERSE_AVAILABLE,
+            "universe_honesty": se.UNIVERSE_HONESTY,
+            "survivorship_bias_status": "partially_unmitigated",
         },
         "access": {
             "api_key_gate_configured": bool(config.api_key),
