@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
+# Personal local desk — binds loopback by default (Phase 7).
+# AUTH_ENABLED=false is intentional for single-operator use on this machine only.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BACKEND="$ROOT/backend"
 FRONTEND="$ROOT/frontend"
 
-echo "Swing Desk — starting…"
+# Loopback only unless operator explicitly overrides (never use 0.0.0.0 with auth off
+# unless ALLOW_PUBLIC_BIND=true — the API will refuse boot otherwise).
+export BIND_HOST="${BIND_HOST:-127.0.0.1}"
+export UVICORN_HOST="$BIND_HOST"
+export ALLOW_PUBLIC_BIND="${ALLOW_PUBLIC_BIND:-false}"
+
+echo "Swing Desk — personal local start"
+echo "  BIND_HOST=$BIND_HOST  (loopback recommended when AUTH is off)"
+echo "  UI will be http://127.0.0.1:3000  API http://127.0.0.1:8000"
+echo "  Not for public network exposure without auth + non-default SECRET_KEY."
 
 if [ ! -d "$BACKEND/venv" ]; then
   echo "Creating Python venv…"
@@ -24,16 +35,15 @@ if [ ! -d "$FRONTEND/node_modules" ]; then
 fi
 
 cd "$BACKEND"
-# Seed demo history if the DB is empty (live ingest can be rate-limited)
 if [ ! -f "$BACKEND/data/swing_trader.db" ]; then
-  echo "No DB yet — seeding demo EOD (replace later with live ingest)…"
-  python seed_demo_data.py || true
+  echo "No DB yet — configure KOTAK_CONSUMER_KEY in backend/.env and Force full from the UI."
+  echo "Demo/synthetic seed is forbidden. Backup later: ./scripts/backup_sqlite.sh"
 fi
-# Platform users + auditable demo signals (idempotent)
-python seed_platform.py || true
-echo "Demo logins: customer@swingdesk.local / Customer1!  ·  admin@swingdesk.local / AdminDemo1!"
 
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
+# seed_platform.py intentionally refuses (Phase 1) — do not treat as required.
+# Platform tables are created on API startup.
+
+uvicorn app.main:app --reload --host "$BIND_HOST" --port 8000 &
 BACKEND_PID=$!
 
 cleanup() {
@@ -42,24 +52,34 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Wait for API health
-echo "Waiting for API…"
+echo "Waiting for API on 127.0.0.1:8000…"
 for i in $(seq 1 30); do
   if curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
-    echo "API ready."
+    echo "API liveness OK."
     break
   fi
   sleep 1
   if [ "$i" -eq 30 ]; then
-    echo "API failed to become healthy."
+    echo "API failed to become healthy (check BIND_HOST / .env / logs)."
     exit 1
   fi
 done
 
 cd "$FRONTEND"
-BROWSER=none npm start &
+# HOST=127.0.0.1 alone breaks CRA 5 / webpack-dev-server 4 (empty allowedHosts).
+# .env.development + DANGEROUSLY_DISABLE_HOST_CHECK keep loopback without that crash.
+BROWSER=none \
+  HOST=127.0.0.1 \
+  DANGEROUSLY_DISABLE_HOST_CHECK=true \
+  WDS_SOCKET_HOST=127.0.0.1 \
+  npm start &
 FRONTEND_PID=$!
 
-echo "UI:  http://localhost:3000"
-echo "API: http://localhost:8000/docs"
+echo ""
+echo "UI:  http://127.0.0.1:3000"
+echo "API: http://127.0.0.1:8000"
+if [ "${ENABLE_API_DOCS:-true}" = "true" ] || [ -z "${ENABLE_API_DOCS:-}" ]; then
+  echo "Docs (local only): http://127.0.0.1:8000/docs"
+fi
+echo "Guide: docs/PERSONAL_USE.md · Ops: docs/OPS.md"
 wait

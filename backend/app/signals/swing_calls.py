@@ -69,7 +69,10 @@ def build_swing_calls(
     freshness = db.freshness(config.max_data_age_days)
     provenance = data_provenance(config.db_path)
     as_of_date = as_of or freshness.get("latest_date")
-    week = iso_week_label(as_of_date)
+    # as_of week = EOD bar week; calendar week = today (journal / "this week" UI)
+    as_of_week = iso_week_label(as_of_date)
+    calendar_week = iso_week_label(None)
+    week = calendar_week
 
     nifty = (
         db.get_nifty_series(end_date=as_of_date, lookback=80)
@@ -85,24 +88,31 @@ def build_swing_calls(
             reason="No EOD data — run Refresh / Force full before consulting swing desk",
             tags=["NO_DATA"],
         )
-        return {
-            "desk": "swing",
-            "horizon": "weekly",
-            "regime": regime,
-            "market_regime": regime,
-            "status": "empty",
-            "week_label": week,
-            "data_status": freshness,
-            "provenance": provenance,
-            "as_of": None,
-            "calls": [hold],
-            "brief": weekly_brief([hold], regime),
-            "count": 1,
-            "buy_count": 0,
-            "hold_count": 1,
-            "message": hold["thesis"],
-            "disclaimer": SWING_DISCLAIMER,
-        }
+        from app.signal_availability import attach_board_availability
+
+        return attach_board_availability(
+            {
+                "desk": "swing",
+                "horizon": "weekly",
+                "strategy": "weekly_swing",
+                "regime": regime,
+                "market_regime": regime,
+                "status": "empty",
+                "week_label": week,
+                "calendar_week_label": calendar_week,
+                "as_of_week_label": as_of_week,
+                "data_status": freshness,
+                "provenance": provenance,
+                "as_of": None,
+                "calls": [hold],
+                "brief": weekly_brief([hold], regime),
+                "count": 1,
+                "buy_count": 0,
+                "hold_count": 1,
+                "message": hold["thesis"],
+                "disclaimer": SWING_DISCLAIMER,
+            }
+        )
 
     snapshot = db.get_joined_snapshot(as_of_date)
     result = generate_weekly_picks(
@@ -211,25 +221,39 @@ def build_swing_calls(
             top_n=enrich_top_n,
         )
 
-    return {
-        "desk": "swing",
-        "horizon": "weekly",
-        "regime": regime,
-        "market_regime": regime,
-        "status": status,
-        "week_label": week,
-        "data_status": freshness,
-        "provenance": provenance,
-        "as_of": as_of_date,
-        "entry_style": result.get("entry_style"),
-        "sizing": result.get("sizing"),
-        "radar": radar,
-        "calls": calls,
-        "brief": weekly_brief(calls, regime),
-        "count": len(calls),
-        "buy_count": sum(1 for c in calls if c["side"] == "BUY"),
-        "sell_count": sum(1 for c in calls if c["side"] == "SELL"),
-        "hold_count": sum(1 for c in calls if c["side"] == "HOLD"),
-        "message": result.get("message"),
-        "disclaimer": SWING_DISCLAIMER or DISCLAIMER,
-    }
+    from app.expectancy.gate import gate_calls
+
+    calls, exp_regime = gate_calls(
+        calls, db=db, desk="swing", as_of=as_of_date, auto_refresh=True
+    )
+
+    from app.signal_availability import attach_board_availability
+
+    return attach_board_availability(
+        {
+            "desk": "swing",
+            "horizon": "weekly",
+            "strategy": "weekly_swing",
+            "regime": regime,
+            "market_regime": regime,
+            "expectancy_regime": exp_regime,
+            "status": status,
+            "week_label": week,
+            "calendar_week_label": calendar_week,
+            "as_of_week_label": as_of_week,
+            "data_status": freshness,
+            "provenance": provenance,
+            "as_of": as_of_date,
+            "entry_style": result.get("entry_style"),
+            "sizing": result.get("sizing"),
+            "radar": radar,
+            "calls": calls,
+            "brief": weekly_brief(calls, regime),
+            "count": len(calls),
+            "buy_count": sum(1 for c in calls if c["side"] == "BUY"),
+            "sell_count": sum(1 for c in calls if c["side"] == "SELL"),
+            "hold_count": sum(1 for c in calls if c["side"] == "HOLD"),
+            "message": result.get("message"),
+            "disclaimer": SWING_DISCLAIMER or DISCLAIMER,
+        }
+    )

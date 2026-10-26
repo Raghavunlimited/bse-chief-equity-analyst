@@ -282,16 +282,17 @@ def grade_intraday(signal: dict[str, Any] | None) -> dict[str, Any]:
 
 def grade_mcx(signal: dict[str, Any] | None) -> dict[str, Any]:
     """
-    Commodity consultant: BUY / SELL / HOLD from global-futures proxy bias.
+    Commodity consultant: BUY / SELL / HOLD from global-futures *proxy* bias.
 
-    Always tags HIGH_LEVERAGE for MCX-mapped names (lots/margins amplify risk).
+    Not an MCX-listed contract grade. Confidence capped; no STRONG path.
     """
+    _PROXY_CAP = 58.0
     if not signal:
         return {
             "side": "HOLD",
             "confidence": clamp_confidence(15.0),
-            "reason": "No commodity tape — HOLD.",
-            "tags": ["NO_SIGNAL", "HIGH_LEVERAGE"],
+            "reason": "No commodity proxy tape — HOLD.",
+            "tags": ["NO_SIGNAL", "GLOBAL_FUTURES_PROXY", "NOT_MCX_LISTED"],
             "symbol": None,
         }
 
@@ -305,46 +306,57 @@ def grade_mcx(signal: dict[str, Any] | None) -> dict[str, Any]:
     thesis = str(signal.get("thesis") or "").strip()
     group = str(signal.get("group") or "").lower()
 
+    if not signal.get("available", True):
+        return {
+            "side": "HOLD",
+            "confidence": clamp_confidence(20.0),
+            "reason": f"{symbol or 'Proxy'}: quote unavailable — HOLD (not MCX).",
+            "tags": list(
+                dict.fromkeys([*tags, "NO_QUOTE", "PROXY_UNAVAILABLE", "NOT_MCX_LISTED"])
+            ),
+            "symbol": symbol,
+        }
+
     if side == "HOLD":
         if score >= _MCX_BUY_MIN:
             side = "BUY"
         elif score <= _MCX_SELL_MAX:
             side = "SELL"
 
-    conf = clamp_confidence(score)
+    conf = clamp_confidence(min(score, _PROXY_CAP))
 
-    # Leverage warning — always on for commodity desk (FX context included)
-    tags = list(dict.fromkeys([*tags, "HIGH_LEVERAGE", "MCX_PROXY"]))
+    tags = list(
+        dict.fromkeys([*tags, "HIGH_LEVERAGE", "MCX_PROXY", "NOT_MCX_LISTED", "NO_LOT_SIZING"])
+    )
     if group == "energy":
         tags = list(dict.fromkeys([*tags, "GAP_RISK"]))
-        conf = clamp_confidence(conf * 0.95)  # slightly more conservative on energy
-    if symbol == "USDINR" or group == "fx":
+        conf = clamp_confidence(conf * 0.95)
+    if symbol == "USDINR" or group == "fx" or signal.get("instrument_class") == "fx_context":
         tags = list(dict.fromkeys([*tags, "FX_CONTEXT"]))
-        # FX row is context, not a leveraged MCX lot call — soft HOLD preference
         if side != "HOLD" and abs(score - 50.0) < 12:
             side = "HOLD"
 
     leverage_note = (
-        " HIGH_LEVERAGE: map to front-month MCX lot/margin yourself; "
-        "gaps and margin calls can exceed cash risk."
+        " Proxy tape only (usually USD continuous futures) — not an INR MCX "
+        "contract. App does not size lots; confirm MCX specs with your broker."
     )
 
     if side == "BUY":
         reason = (
-            f"{symbol}: BUY bias (commodity proxy) · score {score:.1f}. "
+            f"{symbol}: BUY bias on global futures proxy · score {score:.1f}. "
             + (thesis + " " if thesis else "")
             + leverage_note
         )
     elif side == "SELL":
         reason = (
-            f"{symbol}: SELL bias (commodity proxy) · score {score:.1f}. "
+            f"{symbol}: SELL bias on global futures proxy · score {score:.1f}. "
             + (thesis + " " if thesis else "")
             + leverage_note
         )
     else:
         conf = clamp_confidence(min(conf, 55.0))
         reason = (
-            f"{symbol or 'Contract'}: HOLD — no clear directional edge "
+            f"{symbol or 'Proxy'}: HOLD — no clear directional edge "
             f"(score {score:.1f})."
             + leverage_note
         )

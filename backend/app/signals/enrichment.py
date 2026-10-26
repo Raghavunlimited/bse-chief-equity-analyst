@@ -17,15 +17,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_TOP_N = 8
 
 OI_NOTE = (
-    "NSE F&O open interest requires a licensed market-data vendor "
-    "(NSE data feed, TrueData, or a broker FO OI API). "
-    "This desk does not invent OI numbers."
+    "Open interest comes from the live Kotak Neo option-chain feed when that "
+    "underlying is activated. Until then oi.available stays false — we do not invent OI."
 )
 
 OI_HOW_TO_ENABLE = (
-    "Later: set OI_PROVIDER + credentials in config, add app.signals.oi "
-    "fetcher, and merge real oi / oi_change / oi_pct_change into this block. "
-    "Until then oi.available stays false and oi fields stay null."
+    "POST /api/kotak/session/login then POST /api/kotak/option-chain/activate "
+    "with the underlying (e.g. NIFTY / RELIANCE). Futures + ATM±wing options stream OI."
 )
 
 # Compact fundamentals keys attached to each call (full payload still on /api/stock)
@@ -70,6 +68,49 @@ def _empty_oi() -> dict[str, Any]:
         "oi_note": OI_NOTE,
         "how_to_enable": OI_HOW_TO_ENABLE,
     }
+
+
+def _oi_from_option_chain(symbol: str) -> dict[str, Any]:
+    """Pull futures OI / PCR summary from an active Kotak option chain."""
+    try:
+        from app.kotak.option_chain import get_option_chain_engine
+
+        eng = get_option_chain_engine()
+        st = eng.status(symbol)
+        if not st.get("active"):
+            return _empty_oi()
+        snap = eng.snapshot(symbol)
+        fut = snap.get("future") or {}
+        fq = fut.get("quote") or {}
+        analytics = snap.get("analytics") or {}
+        oi = fq.get("oi")
+        prev = fq.get("prev_day_oi")
+        oi_chg = None
+        oi_pct = None
+        if oi is not None and prev not in (None, 0):
+            oi_chg = float(oi) - float(prev)
+            oi_pct = (oi_chg / float(prev)) * 100.0
+        elif oi is not None and fut.get("buildup"):
+            oi_chg = (fut["buildup"] or {}).get("oi_change")
+        return {
+            "available": oi is not None or analytics.get("total_oi_pcr") is not None,
+            "oi": oi,
+            "oi_change": oi_chg,
+            "oi_pct_change": round(oi_pct, 3) if oi_pct is not None else None,
+            "total_oi_pcr": analytics.get("total_oi_pcr"),
+            "atm_pcr": analytics.get("atm_pcr"),
+            "max_pain": analytics.get("max_pain"),
+            "call_wall": analytics.get("call_wall"),
+            "put_wall": analytics.get("put_wall"),
+            "future_buildup": fut.get("buildup"),
+            "expiry": snap.get("expiry"),
+            "source": "kotak_neo_ws",
+            "oi_note": "Live Kotak F&O OI via option-chain engine",
+            "how_to_enable": OI_HOW_TO_ENABLE,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.debug("OI chain enrich skip %s: %s", symbol, e)
+        return _empty_oi()
 
 
 def _fundamentals_slice(payload: dict[str, Any] | None, symbol: str) -> dict[str, Any]:
@@ -159,7 +200,6 @@ def enrich_symbols(
         fins = {}
 
     vol_map = _volume_rows_from_store(db, syms, as_of)
-    oi = _empty_oi()
 
     out: dict[str, dict[str, Any]] = {}
     for s in syms:
@@ -171,11 +211,12 @@ def enrich_symbols(
             "vol_vs_ma20": None,
             "note": "No local EOD volume / vol_ma_20 for this symbol yet",
         }
+        oi = _oi_from_option_chain(s)
         out[s] = {
             "fundamentals": _fundamentals_slice(fins.get(s), s),
             "volume": vol,
-            "oi": dict(oi),
-            "oi_note": OI_NOTE,
+            "oi": oi,
+            "oi_note": oi.get("oi_note") or OI_NOTE,
         }
     return out
 

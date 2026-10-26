@@ -6,7 +6,12 @@ import StockBrowser from './components/StockBrowser';
 import BacktestSection from './components/BacktestSection';
 import CapitalDesk, { loadCapitalSettings } from './components/CapitalDesk';
 import WeekJournal from './components/WeekJournal';
+import TradeLedger from './components/TradeLedger';
+import PositionSizer from './components/PositionSizer';
+import MarketEventsCalendar from './components/MarketEventsCalendar';
+import StrategyEvaluation from './components/StrategyEvaluation';
 import IntradayDesk from './components/IntradayDesk';
+import IndexDesk from './components/IndexDesk';
 import McxDesk from './components/McxDesk';
 import SignalBoard from './components/SignalBoard';
 import SettingsDrawer, {
@@ -15,8 +20,13 @@ import SettingsDrawer, {
 import AuthGate from './components/AuthGate';
 import AdminPanel from './components/AdminPanel';
 import SignalHistory from './components/SignalHistory';
+import SignalAvailabilityBanner from './components/SignalAvailabilityBanner';
 import ProvenanceBadge from './components/ProvenanceBadge';
+import MarketSessionBanner from './components/MarketSessionBanner';
+import { isoWeekLabel } from './isoWeek';
 import './App.css';
+
+export { isoWeekLabel } from './isoWeek';
 
 const DESKS = [
   {
@@ -32,6 +42,12 @@ const DESKS = [
     tape: 'SESSION',
   },
   {
+    id: 'index',
+    label: 'Index',
+    blurb: 'Nifty · BankNifty',
+    tape: 'INDEX',
+  },
+  {
     id: 'mcx',
     label: 'MCX',
     blurb: 'Commodities tape',
@@ -43,16 +59,6 @@ function regimeClass(regime) {
   if (regime === 'STRONG_BULL' || regime === 'BULL') return 'regime--bull';
   if (regime === 'BEAR') return 'regime--bear';
   return 'regime--neutral';
-}
-
-/** Client-side ISO week label e.g. 2026-W43 */
-export function isoWeekLabel(date = new Date()) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
 }
 
 export default function App() {
@@ -79,6 +85,8 @@ export default function App() {
     });
   }, []);
   const [kotak, setKotak] = useState(null);
+  const [kotakFeed, setKotakFeed] = useState(null);
+  const [ingestMeta, setIngestMeta] = useState(null);
   const [feedTest, setFeedTest] = useState(null);
   const [testingFeed, setTestingFeed] = useState(null);
   const [query, setQuery] = useState('');
@@ -120,7 +128,7 @@ export default function App() {
     const s = settings || capitalRef.current;
     setError(null);
     try {
-      const [p, r, st, k] = await Promise.all([
+      const [p, r, st, k, kf, ing] = await Promise.all([
         deskAPI.getWeeklyPicks({
           capital: s.capital,
           risk_pct: s.riskPct,
@@ -132,11 +140,15 @@ export default function App() {
         deskAPI.getMarketRegime(),
         deskAPI.getStats(),
         deskAPI.kotakStatus().catch(() => ({ data: null })),
+        deskAPI.kotakFeedStatus().catch(() => ({ data: null })),
+        deskAPI.ingestStatus().catch(() => ({ data: null })),
       ]);
       setPicks(p.data);
       setRegime(r.data);
       setStats(st.data);
       setKotak(k.data);
+      setKotakFeed(kf.data);
+      setIngestMeta(ing.data);
     } catch (e) {
       setError(e.response?.data?.detail || e.message || 'Failed to load desk');
     } finally {
@@ -315,8 +327,15 @@ export default function App() {
   const candidates = picks?.candidates || [];
   const radar = picks?.radar || [];
   const goalPlan = picks?.goal_plan;
+  // Hero / journal / planner use *calendar* ISO week (today), not EOD as-of week.
+  // Last Friday's bars are still week 43 while Monday trading week is already 44.
   const weekLabel =
-    picks?.goal_plan?.week_label || picks?.week_label || isoWeekLabel();
+    picks?.calendar_week_label || isoWeekLabel();
+  const dataWeekLabel =
+    picks?.as_of_week_label ||
+    picks?.goal_plan?.week_label ||
+    picks?.week_label ||
+    null;
   const isStale = dataStatus?.status === 'STALE' || picks?.status === 'stale';
   const isCash = picks?.status === 'cash' || candidates.length === 0;
   const coverage = stats?.coverage || {};
@@ -358,7 +377,11 @@ export default function App() {
   };
 
   const categoryForDesk =
-    desk === 'mcx' ? 'commodity' : desk === 'intraday' ? 'intraday' : 'swing';
+    desk === 'mcx'
+      ? 'commodity'
+      : desk === 'intraday' || desk === 'index'
+        ? 'intraday'
+        : 'swing';
 
   return (
     <AuthGate
@@ -374,6 +397,7 @@ export default function App() {
     >
     <div className="desk">
       <div className="desk__atmosphere" aria-hidden />
+      <MarketSessionBanner />
       {(() => {
         const isDemo =
           stats?.provenance?.is_demo ||
@@ -383,23 +407,25 @@ export default function App() {
           stats?.provenance?.data_source ||
           picks?.provenance?.data_source ||
           (kotak?.configured ? 'kotak' : 'unknown');
+        if (isDemo) {
+          return (
+            <div className="demo-banner" role="alert">
+              <ProvenanceBadge dataMode="error" note="Synthetic EOD in DB" />
+              <span>
+                DEMO provenance detected — forbidden. Run Force full with Kotak. Refusing to
+                treat these closes as live.
+              </span>
+            </div>
+          );
+        }
         return (
-          <div
-            className={`demo-banner ${isDemo ? '' : 'demo-banner--live'}`}
-            role="status"
-          >
+          <div className="demo-banner demo-banner--live" role="status">
             <ProvenanceBadge
-              dataMode={isDemo ? 'demo' : 'delayed'}
-              note={
-                isDemo
-                  ? 'Sample/demo EOD — run Force full with Kotak for live session closes.'
-                  : `EOD from ${src} (previous session close — not live LTP).`
-              }
+              priceKind="eod_close"
+              note={`Swing/stock cards use ${src} EOD close — not LTP`}
             />
             <span>
-              {isDemo
-                ? 'Demo mode on. Set ALLOW_DEMO_DATA=false and refresh Kotak for personal live EOD.'
-                : 'Personal desk: real Kotak EOD + rule-based calls. No trade execution. BEAR = cash by design.'}
+              Personal desk · live adapter only · Swing=EOD · Intraday/Index=LTP · no execution
             </span>
           </div>
         );
@@ -452,7 +478,7 @@ export default function App() {
           )}
         </div>
         <div className="nav-actions">
-          {authUser?.role === 'admin' ? (
+          {authUser?.role === 'admin' && authUser?.email !== 'operator@local' ? (
             <button type="button" className="btn ghost" onClick={() => setAdminOpen(true)}>
               Admin
             </button>
@@ -522,6 +548,11 @@ export default function App() {
           <div className="hero__week" aria-label={`ISO week ${weekLabel}`}>
             <span className="hero__week-label">Week</span>
             <span className="hero__week-value">{weekLabel}</span>
+            {dataWeekLabel && dataWeekLabel !== weekLabel ? (
+              <span className="hero__week-asof muted" title="ISO week of latest EOD bar">
+                data {dataWeekLabel}
+              </span>
+            ) : null}
           </div>
           <h1 className="hero__title">This week&apos;s setups</h1>
           <p className="hero__sub">
@@ -541,13 +572,23 @@ export default function App() {
               </p>
             </>
           )}
+          {desk === 'index' && (
+            <>
+              <p className="eyebrow">Nifty · BankNifty · multi-timeframe</p>
+              <h1 className="hero__title">Index desk</h1>
+              <p className="hero__sub">
+                Live index bias from daily SMA regime + 5m EMA/VWAP/RSI, plus Kotak
+                option-chain PCR / walls when the feed is live. Size F&amp;O risk yourself.
+              </p>
+            </>
+          )}
           {desk === 'mcx' && (
             <>
-              <p className="eyebrow">Commodities · MCX majors via global futures</p>
-              <h1 className="hero__title">MCX desk</h1>
+              <p className="eyebrow">Commodities · global futures proxy (not MCX INR)</p>
+              <h1 className="hero__title">Commodities desk</h1>
               <p className="hero__sub">
-                Gold, Silver, Crude, NatGas, Copper directional tape with USDINR context.
-                Map to the front-month MCX contract and lot size yourself.
+                Yahoo continuous futures (usually USD) + USDINR — not INR MCX contracts.
+                Related MCX names are hints only; this app does not size lots or place orders.
               </p>
             </>
           )}
@@ -593,12 +634,12 @@ export default function App() {
                 onClick={() =>
                   explainChip(
                     'demo',
-                    'Demo prices',
-                    'Synthetic seed data — not live market prices. Click Force full with Kotak ready to load real EOD.',
+                    'Forbidden demo EOD',
+                    'Synthetic seed detected in DB. Phase 1 refuses demo. Run Force full with Kotak.',
                   )
                 }
               >
-                DEMO — not live
+                DEMO FORBIDDEN
               </button>
             )}
             {!isDemo && provenance?.data_source && (
@@ -634,6 +675,31 @@ export default function App() {
                 Kotak {kotak.configured ? 'ready' : 'off'}
               </button>
             )}
+            {kotakFeed && (
+              <button
+                type="button"
+                className={`meta-chip meta-chip--btn ${
+                  kotakFeed?.ws?.connected ? 'meta-chip--live' : 'meta-chip--demo'
+                } ${chipInfo?.id === 'kotakws' ? 'is-active' : ''}`}
+                onClick={() => {
+                  const ws = kotakFeed.ws || {};
+                  const pol = kotakFeed.provider_policy || {};
+                  const fb = pol.yahoo_ltp_fallback_allowed !== false;
+                  explainChip(
+                    'kotakws',
+                    ws.connected ? 'Kotak WS connected' : 'Kotak WS off',
+                    ws.connected
+                      ? `Broker LTP path active (${ws.protocol || 'native_batch'}). Quotes cached: ${kotakFeed.quotes_cached ?? 0}. Depth/F&O subscribe paths exist in code — not live-verified in this build.`
+                      : `No broker stream. Intraday/Index use Yahoo research FALLBACK (never labeled broker LIVE) when ALLOW_YAHOO_LTP_FALLBACK=${fb ? 'true' : 'false'}. Login via POST /api/kotak/session/login (TOTP) to start WS.`,
+                  );
+                }}
+              >
+                WS {kotakFeed?.ws?.connected ? 'LIVE' : 'off'}
+                {kotakFeed?.provider_policy?.yahoo_ltp_fallback_allowed === false
+                  ? ' · no Yahoo'
+                  : ''}
+              </button>
+            )}
             {dataStatus?.latest_date && (
               <button
                 type="button"
@@ -642,13 +708,60 @@ export default function App() {
                   explainChip(
                     'eod',
                     `EOD ${dataStatus.latest_date} · ${dataStatus.status || '—'}`,
-                    dataStatus.message ||
-                      `Latest local candle date is ${dataStatus.latest_date}. FRESH means recent enough for the desk; STALE means Refresh / Force full first.`,
+                    [
+                      dataStatus.message,
+                      dataStatus.expected_as_of
+                        ? `Expected session ${dataStatus.expected_as_of} (${dataStatus.age_unit || 'trading_days'} age ${dataStatus.age_days ?? '—'}).`
+                        : null,
+                      dataStatus.holiday_list_complete === false
+                        ? 'Holiday list incomplete — verify NSE circular.'
+                        : null,
+                      'STALE → Refresh / Force full or wait for scheduled post-close ingest.',
+                    ]
+                      .filter(Boolean)
+                      .join(' '),
                   )
                 }
               >
                 EOD {dataStatus.latest_date}
                 {dataStatus.status ? ` · ${dataStatus.status}` : ''}
+              </button>
+            )}
+            {ingestMeta?.scheduler && (
+              <button
+                type="button"
+                className={`meta-chip meta-chip--btn ${
+                  ingestMeta.scheduler.schedule_enabled ? 'meta-chip--live' : 'meta-chip--demo'
+                } ${chipInfo?.id === 'eodsched' ? 'is-active' : ''}`}
+                onClick={() => {
+                  const sch = ingestMeta.scheduler || {};
+                  const j = ingestMeta.journal?.last_success || {};
+                  const cal = ingestMeta.calendar || {};
+                  explainChip(
+                    'eodsched',
+                    sch.schedule_enabled ? `EOD schedule ${sch.time_ist || ''} IST` : 'EOD schedule off',
+                    [
+                      sch.schedule_enabled
+                        ? `Runs ~${sch.time_ist} IST on trading days (settle ${sch.settle_ist}).`
+                        : 'Set EOD_INGEST_SCHEDULE_ENABLED=true to enable.',
+                      cal.expected_eod_as_of
+                        ? `Expected EOD ${cal.expected_eod_as_of}.`
+                        : null,
+                      j.finished_at
+                        ? `Last success: session ${j.target_session || '—'} via ${j.provider || '—'}.`
+                        : 'No successful ingest recorded yet.',
+                      ingestMeta.journal?.last_run?.status === 'error'
+                        ? `Last error: ${ingestMeta.journal.last_run.error || ingestMeta.journal.last_run.message || 'failed'}`
+                        : null,
+                      cal.limitation ||
+                        'Holidays from operator-maintained snapshot — not live NSE sync.',
+                    ]
+                      .filter(Boolean)
+                      .join(' '),
+                  );
+                }}
+              >
+                Sched {ingestMeta.scheduler.schedule_enabled ? ingestMeta.scheduler.time_ist || 'on' : 'off'}
               </button>
             )}
             <button
@@ -719,22 +832,31 @@ export default function App() {
         )}
 
         {isDemo && !loading && (
-          <div className="banner warn">
-            Synthetic demo prices on screen. Run <em>Force full</em> with Kotak for live EOD.
+          <div className="banner warn" role="alert">
+            Synthetic DEMO EOD detected — forbidden. Run <em>Force full</em> with Kotak. No
+            mock prices will be treated as live.
           </div>
         )}
 
         {isStale && !loading && !isDemo && (
-          <div className="banner warn">Price data is stale. Refresh before acting.</div>
+          <SignalAvailabilityBanner
+            availability={{
+              code: 'data_blocked',
+              label: 'Signal evaluation blocked — data stale or unavailable',
+              detail: `EOD candles are stale vs expected trading session${
+                dataStatus?.expected_as_of ? ` (${dataStatus.expected_as_of})` : ''
+              }. Refresh / Force full, or wait for scheduled post-close ingest. Stale data never produces a fresh swing signal.`,
+            }}
+          />
         )}
 
         {!loading && regime && !regime.allow_trading && (
           <div className="banner cash-banner">
-            <strong>Cash week — {regime.regime?.replace('_', ' ')}</strong>
+            <strong>No qualifying signal — strategy conditions not met</strong>
             <p>
-              {picks?.message || regime.reason} This is intentional risk control, not a
-              broken feed — switch to <em>Intraday</em> or <em>MCX</em> for live desks, or
-              study the momentum radar below.
+              Cash week — {regime.regime?.replace('_', ' ')}. {picks?.message || regime.reason}{' '}
+              Intentional risk control, not a broken feed — switch to <em>Intraday</em> or{' '}
+              <em>MCX</em> for live desks, or study the momentum radar below.
             </p>
             {regime.nifty_price != null && (
               <p className="cash-banner__levels">
@@ -749,9 +871,13 @@ export default function App() {
         )}
 
         {!loading && !isStale && isCash && regime?.allow_trading && (
-          <div className="banner info">
-            {picks?.message || 'No setups meet criteria — stay in cash.'}
-          </div>
+          <SignalAvailabilityBanner
+            availability={{
+              code: 'no_qualifying',
+              label: 'No qualifying signal — strategy conditions not met',
+              detail: picks?.message || 'No setups meet criteria — stay in cash.',
+            }}
+          />
         )}
 
         <div className="picks-row">
@@ -781,18 +907,25 @@ export default function App() {
         {desk === 'intraday' && (
           <IntradayDesk onOpen={openSymbol} onAnalyze={onAnalyzeSignal} />
         )}
+        {desk === 'index' && (
+          <IndexDesk onOpen={openSymbol} onAnalyze={onAnalyzeSignal} />
+        )}
         {desk === 'mcx' && <McxDesk onAnalyze={onAnalyzeSignal} />}
       </main>
 
       {desk === 'swing' && (
       <div className="desk__below">
-        {swingCalls && (swingCalls.signals || swingCalls.calls)?.length > 0 && (
+        {swingCalls &&
+          ((swingCalls.signals || swingCalls.calls)?.length > 0 ||
+            swingCalls.signal_availability) && (
           <section className="section consultant-swing" id="section-consultant-swing">
             <SignalBoard
               title="Weekly consultant calls"
               subtitle="BUY / SELL / HOLD from the consultant desk — research math, not tips."
               signals={swingCalls.signals || swingCalls.calls}
+              desk="swing"
               source={swingCalls._source || 'consultant'}
+              availability={swingCalls.signal_availability}
               onOpen={openSymbol}
               onAnalyze={onAnalyzeSignal}
             />
@@ -806,6 +939,14 @@ export default function App() {
             Consultant swing feed unavailable — using classic picks above.
           </p>
         )}
+
+        <TradeLedger />
+
+        <PositionSizer />
+
+        <MarketEventsCalendar />
+
+        <StrategyEvaluation />
 
         <WeekJournal
           weekLabel={weekLabel}
@@ -895,7 +1036,7 @@ export default function App() {
       </div>
       )}
 
-      {(desk === 'intraday' || desk === 'mcx') && (
+      {(desk === 'intraday' || desk === 'index' || desk === 'mcx') && (
         <div className="desk__body">
           <SignalHistory
             category={categoryForDesk}

@@ -134,7 +134,7 @@ def apply_baseline(
     symbol: str,
     category: str,
     evidence: Dict[str, Any],
-    data_mode: str = "demo",
+    data_mode: str = "delayed",
     timeframe: Optional[str] = None,
 ) -> Dict[str, Any]:
     graded = score_evidence(evidence)

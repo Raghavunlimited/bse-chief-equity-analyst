@@ -4,29 +4,29 @@
 
 ```bash
 cd bse-chief-equity-analyst
-cp backend/.env.example backend/.env   # if needed
-cd backend && python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python seed_platform.py
-uvicorn app.main:app --reload --port 8000
+cp backend/.env.example backend/.env
+# Set KOTAK_CONSUMER_KEY=… and a unique SECRET_KEY=
+./start.sh
 ```
 
-In another terminal:
+Or manually:
 
 ```bash
-cd frontend && npm install && npm start
+cd backend && python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+# BIND_HOST defaults to 127.0.0.1 — do not use 0.0.0.0 with AUTH off
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Or: `./start.sh` then run `python backend/seed_platform.py` once.
+```bash
+cd frontend && npm install && HOST=127.0.0.1 DANGEROUSLY_DISABLE_HOST_CHECK=true BROWSER=none npm start
+```
 
-Open http://localhost:3000 and sign in:
+Open http://127.0.0.1:3000 — **personal desk, AUTH off, loopback only**.
 
-| Role | Email | Password |
-|------|-------|----------|
-| Customer | customer@swingdesk.local | Customer1! |
-| Admin | admin@swingdesk.local | AdminDemo1! |
+**Required `.env`:** `MARKET_DATA_ADAPTER=live`, `AUTH_ENABLED=false`, `LIVE_QUOTE_STALE_SEC=5`, `KOTAK_CONSUMER_KEY=…`, `MAX_INGEST_SYMBOLS=0`, `BIND_HOST=127.0.0.1`. Demo adapter / `seed_demo_data` / `seed_platform` are **forbidden**. Force full for EOD.
 
-**Personal / real EOD:** set `MAX_INGEST_SYMBOLS=0`, `ALLOW_DEMO_DATA=false`, Kotak key, then **Force full**. Guides: `docs/PERSONAL_USE.md` and `Swing_Desk_Personal_Guide.pdf`. Full EQ list: `backend/nse_eq_symbols.txt` (~2526).
+Guides: [`docs/PERSONAL_USE.md`](docs/PERSONAL_USE.md) · Ops/backup: [`docs/OPS.md`](docs/OPS.md)
 
 ## Docker Compose
 
@@ -34,19 +34,28 @@ Open http://localhost:3000 and sign in:
 docker compose up --build
 ```
 
-API :8000 · Web :3000. Seeds demo users/signals on API start.
+API http://127.0.0.1:8000 · Web http://127.0.0.1:3000 (ports bound to loopback). Requires `KOTAK_CONSUMER_KEY` in the environment for live EOD. No demo seed.
 
-## Tests
+## Tests (CI-equivalent)
 
 ```bash
-cd backend && python test_mvp_platform.py
-cd frontend && CI=true npm test -- --watchAll=false
+cd backend
+export AUTH_ENABLED=false SECRET_KEY='ci-test-secret-key-32chars-min!!' MARKET_DATA_ADAPTER=live
+export EOD_INGEST_SCHEDULE_ENABLED=false
+python test_methodology.py
+python test_phase1_market.py test_phase2_kotak_feed.py test_phase2_provider.py
+python test_phase3_bars.py test_phase3_option_chain.py
+python test_phase4_eod.py test_phase4_chart.py
+python test_phase5_mcx.py test_phase5_expectancy.py
+python test_phase6_chart.py test_phase7_ops.py
+python test_crypto_adapters.py test_mvp_platform.py test_analyze_validation.py
+cd ../frontend && CI=true npm test -- --watchAll=false && npm run build
 ```
 
 ## Troubleshooting
 
-- **401 on platform routes** — sign in; check `AUTH_ENABLED` and session token.
-- **Empty signal ledger** — run `python seed_platform.py`.
+- **API refuses boot on 0.0.0.0** — expected with `AUTH_ENABLED=false`. Use `BIND_HOST=127.0.0.1` or set `ALLOW_PUBLIC_BIND=true` only after enabling auth / API key.
+- **Empty EOD / not ready** — set Kotak key and Force full. Demo seed is refused.
 - **LLM analyze 422** — configure vault in Settings or pass a one-shot key in the panel.
-- **Kotak / live EOD** — optional; set `KOTAK_CONSUMER_KEY`. Demo mode works without it.
-- **Fernet errors** — set a stable `SECRET_KEY` (and optional `LLM_FERNET_KEY`) before storing keys; changing the key invalidates vault ciphertext.
+- **Fernet errors** — set a stable unique `SECRET_KEY` before storing LLM keys.
+- **Backup** — `./scripts/backup_sqlite.sh`

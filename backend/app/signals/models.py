@@ -12,7 +12,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 Side = Literal["BUY", "SELL", "HOLD"]
-Desk = Literal["swing", "intraday", "mcx"]
+Desk = Literal["swing", "intraday", "mcx", "index"]
 
 DISCLAIMER = (
     "Research / education only. Not investment advice. Not a profit guarantee. "

@@ -10,6 +10,7 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Query
 
+from app.signals.index_calls import INDEX_DISCLAIMER, build_index_calls
 from app.signals.intraday_calls import INTRADAY_DISCLAIMER, build_intraday_calls
 from app.signals.mcx_calls import MCX_DISCLAIMER, build_mcx_calls
 from app.signals.models import RESEARCH_DISCLAIMER
@@ -48,25 +49,47 @@ def consultant_intraday(limit: int = Query(20, ge=5, le=30)):
 
 @router.get("/mcx")
 def consultant_mcx():
-    """MCX / commodities consultant board via global futures proxy."""
+    """Commodities board via Yahoo global futures proxy — not MCX INR contracts."""
     return build_mcx_calls()
+
+
+@router.get("/mcx/instruments")
+def consultant_mcx_instruments():
+    """Public instrument catalog with honesty fields (currency, proxy class, roll notes)."""
+    from app.strategy.mcx_instruments import public_catalog
+
+    return {
+        "status": "ok",
+        "is_mcx_listed_feed": False,
+        "expectancy_gated": False,
+        "instruments": public_catalog(),
+        "disclaimer": MCX_DISCLAIMER,
+    }
+
+@router.get("/index")
+def consultant_index():
+    """Nifty + BankNifty multi-timeframe index bias (EMA/VWAP/RSI + daily SMA)."""
+    return build_index_calls()
 
 
 @router.get("/daily")
 def consultant_daily(limit: int = Query(20, ge=5, le=30)):
-    """Daily snapshot: intraday equities + MCX commodities in one payload."""
+    """Daily snapshot: intraday equities + index + MCX commodities."""
     intraday = build_intraday_calls(limit=limit)
+    index = build_index_calls()
     mcx = build_mcx_calls()
     return {
         "snapshot": "daily",
         "as_of": datetime.now(timezone.utc).isoformat(),
-        "desks": ["intraday", "mcx"],
+        "desks": ["intraday", "index", "mcx"],
         "intraday": intraday,
+        "index": index,
         "mcx": mcx,
-        "message": "Combined intraday + MCX research snapshot.",
+        "message": "Combined intraday + index + MCX research snapshot.",
         "disclaimer": RESEARCH_DISCLAIMER,
         "desk_disclaimers": {
             "intraday": INTRADAY_DISCLAIMER,
+            "index": INDEX_DISCLAIMER,
             "mcx": MCX_DISCLAIMER,
         },
     }

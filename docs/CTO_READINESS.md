@@ -12,9 +12,11 @@
 
 **Not production-ready for a public or paid signals product.** Strong research desk for local/single-operator use (strategy clarity, freshness gates, feed provenance, per-desk disclaimers). Gaps in auth, CORS, deploy hardening, observability, SLA automation, and India regulatory packaging block a safe go-live.
 
+**Phase 7 (2026-10-26) update:** Personal/local posture hardened — loopback bind by default, boot refuse for `0.0.0.0` + auth off without `ALLOW_PUBLIC_BIND`, CORS no longer defaults to `*`, SQLite backup script + schema check on `/api/health`, docs/start.sh reconciled. **Still not a production-ready public claim** (`production_ready_claim: false` on health). See `docs/OPS.md`.
+
 ### Mitigated in app v3.3.1 (partial)
 - `CORS_ORIGINS` from env (default `*` for local; set explicit origins in prod)
-- Optional `API_KEY` → `X-API-Key` required for ingest / journal POST / backtest / Kotak test
+- Optional `API_KEY` → `X-API-Key` required for ingest / journal POST / backtest / ledger / Kotak login-test / `POST /api/strategy-evaluation/evaluate` (+ `GET ?run_harness=true`). Empty `API_KEY` = open gate for personal loopback UI.
 - `/api/health` = liveness; `/api/health/ready` = freshness + `ALLOW_DEMO_DATA` gate (503 when not ready)
 - `ENABLE_API_DOCS=false` hides `/docs` + OpenAPI
 - Kotak `env_path` no longer returned unless `LOG_LEVEL=DEBUG`

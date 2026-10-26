@@ -12,7 +12,7 @@ from app.pipeline import run_incremental_ingest
 
 
 def main():
-    result = run_incremental_ingest()
+    result = run_incremental_ingest(trigger="cli")
     print(json.dumps(result, indent=2, default=str))
     return 0 if result.get("status") == "ok" else 1
 

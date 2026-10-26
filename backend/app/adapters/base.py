@@ -1,16 +1,17 @@
-"""Market-data adapter ABC — prices, OI, financials with provenance."""
+"""Market-data adapter ABC — prices, OI, financials with provenance (no demo)."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Literal, TypedDict
 
-Provenance = Literal["live", "delayed", "stale", "demo"]
+# demo intentionally removed — adapters must be live / delayed / stale only
+Provenance = Literal["live", "delayed", "stale"]
 
 
 class ProvenanceFields(TypedDict):
     provenance: Provenance
     as_of: str  # ISO-8601 UTC
-    source: str  # adapter id, e.g. "demo", "yahoo", "kotak"
+    source: str  # adapter id, e.g. "yahoo_live", "kotak"
 
 
 class QuotePayload(ProvenanceFields):
@@ -67,7 +68,7 @@ class MarketDataAdapter(ABC):
 
     @abstractmethod
     def get_quote(self, symbol: str) -> QuotePayload:
-        """Latest mark / session quote for ``symbol``."""
+        """Latest LTP / session quote for ``symbol`` (never EOD close labeled as LTP)."""
 
     @abstractmethod
     def get_bars(
@@ -76,11 +77,11 @@ class MarketDataAdapter(ABC):
         interval: str = "1d",
         lookback: int = 60,
     ) -> BarsPayload:
-        """OHLCV series ending at adapter as-of."""
+        """OHLCV series — daily bars are EOD settlement unless interval is intraday."""
 
     @abstractmethod
     def get_oi(self, symbol: str) -> OiPayload:
-        """Open interest snapshot (commodities / F&O); zeros if N/A."""
+        """Open interest snapshot (commodities / F&O). Must raise if unavailable."""
 
     @abstractmethod
     def get_financials(self, symbol: str) -> FinancialsPayload:

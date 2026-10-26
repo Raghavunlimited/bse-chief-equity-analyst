@@ -1,5 +1,8 @@
-# Local development stack — no paid market-data credentials required.
-# Demo adapter + SQLite by default. Postgres optional for closer-to-prod storage.
+# Personal desk stack — live adapter only.
+# Ports published on loopback so an unauthenticated desk is not LAN-exposed by default.
+# Inside the container uvicorn still binds 0.0.0.0; ALLOW_PUBLIC_BIND=true is required
+# for that container listen. Do NOT change host ports to 0.0.0.0:8000:8000 without
+# enabling AUTH_ENABLED / API_KEY and a non-default SECRET_KEY.
 
 services:
   api:
@@ -7,45 +10,35 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       DATABASE_PATH: /data/swing_trader.db
-      AUTH_ENABLED: "true"
+      AUTH_ENABLED: "false"
       SECRET_KEY: ${SECRET_KEY:-dev-only-change-me-swing-desk-32c}
-      ALLOW_DEMO_DATA: "true"
-      MARKET_DATA_ADAPTER: demo
+      MARKET_DATA_ADAPTER: live
+      LIVE_QUOTE_STALE_SEC: "5"
+      KOTAK_CONSUMER_KEY: ${KOTAK_CONSUMER_KEY:-}
       ENABLE_API_DOCS: "true"
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
       LOG_LEVEL: INFO
+      BIND_HOST: "0.0.0.0"
+      ALLOW_PUBLIC_BIND: "true"
+      EOD_INGEST_SCHEDULE_ENABLED: "true"
     volumes:
       - swing_data:/data
     command: >
-      sh -c "python seed_platform.py &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   web:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
-      # CRA proxy target inside compose network
-      REACT_APP_API_HINT: http://localhost:8000
+      REACT_APP_API_HINT: http://127.0.0.1:8000
     depends_on:
       - api
-
-  # Optional: uncomment to use Postgres instead of SQLite volume
-  # postgres:
-  #   image: postgres:16-alpine
-  #   environment:
-  #     POSTGRES_USER: swing
-  #     POSTGRES_PASSWORD: swing
-  #     POSTGRES_DB: swingdesk
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
 
 volumes:
   swing_data:

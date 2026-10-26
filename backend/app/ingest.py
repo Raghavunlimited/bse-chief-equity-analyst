@@ -190,10 +190,16 @@ class NSEDataIngester:
 
     @staticmethod
     def latest_weekday(from_dt: datetime | None = None) -> datetime:
-        candidate = (from_dt or datetime.now()) - timedelta(days=1)
-        while candidate.weekday() >= 5:
-            candidate -= timedelta(days=1)
-        return candidate.replace(hour=0, minute=0, second=0, microsecond=0)
+        """Previous trading day (weekends + configured NSE holidays)."""
+        from app.nse_calendar import previous_trading_day
+        from zoneinfo import ZoneInfo
+
+        IST = ZoneInfo("Asia/Kolkata")
+        base = from_dt or datetime.now(IST)
+        if base.tzinfo is None:
+            base = base.replace(tzinfo=IST)
+        prev = previous_trading_day(base.astimezone(IST).date())
+        return datetime(prev.year, prev.month, prev.day)
 
     def ingest_date(self, trade_date: datetime) -> pd.DataFrame:
         path = self.download_bhavcopy(trade_date)
@@ -217,7 +223,9 @@ class NSEDataIngester:
         current = start
         days_tried = 0
         while current <= end_dt and days_tried < max_days:
-            if current.weekday() < 5:
+            from app.nse_calendar import is_trading_day
+
+            if is_trading_day(current.date()):
                 df = self.ingest_date(current)
                 if not df.empty:
                     frames.append(df)

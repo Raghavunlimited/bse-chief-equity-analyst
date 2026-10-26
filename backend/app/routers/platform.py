@@ -1,11 +1,11 @@
-"""Customer-facing platform: signals history, market data via adapters, disclosures."""
+"""Platform market + signal history — live adapter only (no demo routes)."""
 from __future__ import annotations
 
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.adapters import get_market_adapter
+from app.adapters import DemoAdapterForbidden, get_market_adapter
 from app.auth_deps import get_current_user, platform
 from app.config import config
 from app.platform_db import PlatformDB
@@ -22,7 +22,7 @@ DISCLOSURE = {
         "and informational purposes only. Analysis is not a guarantee of returns, not "
         "personalized investment advice, and not an offer to buy or sell securities or "
         "commodities. The platform does not execute trades or connect to brokerage accounts. "
-        "Past patterns and demo illustrations do not predict future results. "
+        "Past patterns do not predict future results. "
         "Verify all data independently before acting."
     ),
     "ai_note": (
@@ -38,6 +38,7 @@ def disclosure():
         **DISCLOSURE,
         "jurisdiction_note": config.jurisdiction_note,
         "data_adapter": config.market_data_adapter,
+        "demo_allowed": False,
     }
 
 
@@ -70,11 +71,27 @@ def list_signals(
         include_history=history,
         limit=limit,
     )
+    # Strip any legacy demo rows from personal desk views
+    live_rows = [r for r in rows if str(r.get("data_mode") or "").lower() != "demo"]
+    from app.signal_availability import (
+        enrich_ledger_signal,
+        summarize_ledger_availability,
+    )
+
+    enriched = [enrich_ledger_signal(r) for r in live_rows]
+    filtered_demo = len(rows) - len(live_rows)
     return {
-        "signals": rows,
-        "count": len(rows),
+        "signals": enriched,
+        "count": len(enriched),
         "includes_history": history,
         "disclosure": DISCLOSURE["title"],
+        "filtered_demo_rows": filtered_demo,
+        "ledger_availability": summarize_ledger_availability(
+            published_count=len(enriched),
+            filtered_demo_rows=filtered_demo,
+            category=category,
+        ),
+        "research_only": True,
     }
 
 
@@ -87,41 +104,33 @@ def get_signal(
     row = db.get_signal(signal_id)
     if not row:
         raise HTTPException(status_code=404, detail="Signal not found")
+    if str(row.get("data_mode") or "").lower() == "demo":
+        raise HTTPException(
+            status_code=410,
+            detail="Demo signals are retired. This record is not available on the live desk.",
+        )
     return row
 
 
 def _wrap_adapter(payload: dict) -> dict:
-    """Normalize adapter TypedDict into API shape with nested provenance + data_mode."""
     out = dict(payload)
-    mode = out.get("provenance") or "demo"
+    mode = out.get("provenance") or "delayed"
+    if mode == "demo":
+        raise HTTPException(status_code=500, detail="Demo provenance leaked into live adapter")
     out["data_mode"] = mode
+    out["price_kind"] = out.get("price_kind") or "ltp"
     out["provenance"] = {
         "data_mode": mode,
         "source": out.get("source") or "unknown",
         "as_of": out.get("as_of"),
-        "note": "DEMO adapter data" if mode == "demo" else f"Source={out.get('source')}",
+        "feed_status": out.get("feed_status"),
+        "quote_age_sec": out.get("quote_age_sec"),
+        "note": f"Source={out.get('source')} price_kind={out.get('price_kind')}",
     }
-    # Convenience aliases used by UI
     if "last" in out and "price" not in out:
         out["price"] = out["last"]
     out["available"] = True
     return out
-
-
-def _unavailable(symbol: str, reason: str) -> dict:
-    return {
-        "symbol": symbol.upper(),
-        "available": False,
-        "price": None,
-        "data_mode": "demo",
-        "provenance": {
-            "data_mode": "demo",
-            "source": "demo",
-            "as_of": None,
-            "note": reason,
-            "incomplete": True,
-        },
-    }
 
 
 @router.get("/market/{symbol}/quote")
@@ -130,12 +139,17 @@ def market_quote(
     category: Category = "swing",
     user: dict = Depends(get_current_user),
 ):
-    _ = category  # reserved for multi-adapter routing
-    adapter = get_market_adapter()
+    _ = category
     try:
+        adapter = get_market_adapter()
         return _wrap_adapter(dict(adapter.get_quote(symbol)))
-    except KeyError:
-        return _unavailable(symbol, "Instrument not in demo universe — no fabricated quote")
+    except DemoAdapterForbidden as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (KeyError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"LIVE quote failed for {symbol}: {exc}",
+        ) from exc
 
 
 @router.get("/market/{symbol}/bars")
@@ -147,13 +161,20 @@ def market_bars(
     user: dict = Depends(get_current_user),
 ):
     _ = category
-    adapter = get_market_adapter()
     try:
-        return _wrap_adapter(
+        adapter = get_market_adapter()
+        payload = _wrap_adapter(
             dict(adapter.get_bars(symbol, interval=timeframe, lookback=limit))
         )
-    except KeyError:
-        return {**_unavailable(symbol, "No demo bars for unknown symbol"), "bars": []}
+        payload["price_kind"] = "eod_close"
+        return payload
+    except DemoAdapterForbidden as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (KeyError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"EOD bars failed for {symbol}: {exc}",
+        ) from exc
 
 
 @router.get("/market/{symbol}/oi")
@@ -163,18 +184,16 @@ def market_oi(
     user: dict = Depends(get_current_user),
 ):
     _ = category
-    adapter = get_market_adapter()
     try:
-        raw = dict(adapter.get_oi(symbol))
-        wrapped = _wrap_adapter(raw)
-        # Honest: equity OI of 0 means not applicable in demo seed
-        if float(raw.get("open_interest") or 0) == 0:
-            wrapped["available"] = False
-            wrapped["note"] = "OI not applicable / zero in demo for this instrument — not fabricated"
-            wrapped["provenance"]["incomplete"] = True
-        return wrapped
-    except KeyError:
-        return _unavailable(symbol, "OI unavailable — not fabricated")
+        adapter = get_market_adapter()
+        return _wrap_adapter(dict(adapter.get_oi(symbol)))
+    except DemoAdapterForbidden as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (KeyError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("/market/{symbol}/financials")
@@ -184,32 +203,25 @@ def market_financials(
     user: dict = Depends(get_current_user),
 ):
     _ = category
-    adapter = get_market_adapter()
     try:
-        raw = dict(adapter.get_financials(symbol))
-        wrapped = _wrap_adapter(raw)
-        if raw.get("pe") is None and (raw.get("extras") or {}).get("asset_class") == "commodity":
-            wrapped["available"] = False
-            wrapped["note"] = "Company financials not applicable to commodities"
-            wrapped["provenance"]["incomplete"] = True
-        return wrapped
-    except KeyError:
-        return _unavailable(symbol, "Financials unavailable — not fabricated")
+        adapter = get_market_adapter()
+        return _wrap_adapter(dict(adapter.get_financials(symbol)))
+    except DemoAdapterForbidden as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (KeyError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Financials failed for {symbol}: {exc}",
+        ) from exc
 
 
 @router.get("/demo/signals")
-def demo_signals_bundle(user: dict = Depends(get_current_user), db: PlatformDB = Depends(platform)):
-    """
-    Clearly labeled demo analyses across swing / intraday / commodity.
-    Never implies live market data.
-    """
-    by_cat = {}
-    for cat in ("swing", "intraday", "commodity"):
-        by_cat[cat] = db.list_signals(category=cat, include_history=True, limit=50)
-    return {
-        "data_mode": "demo",
-        "label": "DEMO — deterministic sample analyses, not live signals",
-        "categories": by_cat,
-        "disclosure": DISCLOSURE,
-        "jurisdiction_note": config.jurisdiction_note,
-    }
+def demo_signals_removed():
+    """Demo signal bundle permanently removed (Phase 1)."""
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Demo signals endpoint removed. "
+            "This desk no longer serves synthetic analyses."
+        ),
+    )

@@ -15,12 +15,14 @@ db = Database(config.db_path)
 _ingest_lock = threading.Lock()
 
 
-def _run_ingest(force_full: bool):
+def _run_ingest(force_full: bool, trigger: str = "manual"):
     if not _ingest_lock.acquire(blocking=False):
         return
     try:
         # Fresh DB handle in this thread — avoids locking the request worker
-        run_incremental_ingest(Database(config.db_path), force_full=force_full)
+        run_incremental_ingest(
+            Database(config.db_path), force_full=force_full, trigger=trigger
+        )
     finally:
         _ingest_lock.release()
 
@@ -60,6 +62,9 @@ def ingest_progress():
 @router.get("/ingest/status")
 def ingest_status():
     from app import kotak_eod
+    from app.ingest_journal import journal_summary, recent_runs
+    from app.ingest_scheduler import scheduler_status
+    from app.nse_calendar import calendar_public_status
 
     return {
         "freshness": db.freshness(config.max_data_age_days),
@@ -67,6 +72,32 @@ def ingest_status():
         "provenance": data_provenance(config.db_path),
         "progress": get_progress(),
         "feeds": {"kotak": kotak_eod.status()},
+        "calendar": calendar_public_status(),
+        "scheduler": scheduler_status(),
+        "journal": journal_summary(),
+        "recent_runs": recent_runs(limit=10),
+        "disclaimer": (
+            "Scheduled ingest runs after EOD settle on trading days (IST). "
+            "Holiday list is an operator-maintained snapshot — not live NSE sync."
+        ),
+    }
+
+
+@router.get("/ingest/calendar")
+def ingest_calendar():
+    from app.nse_calendar import calendar_public_status
+
+    return {"status": "ok", **calendar_public_status()}
+
+
+@router.get("/ingest/journal")
+def ingest_journal(limit: int = Query(20, ge=1, le=100)):
+    from app.ingest_journal import journal_summary, recent_runs
+
+    return {
+        "status": "ok",
+        "summary": journal_summary(),
+        "runs": recent_runs(limit=limit),
     }
 
 

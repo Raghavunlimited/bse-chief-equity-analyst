@@ -53,8 +53,19 @@ class Config:
     max_hold_days: int = int(os.getenv("MAX_HOLD_DAYS", "5"))
     round_trip_cost: float = _float("ROUND_TRIP_COST", 0.0015)  # ~0.15%
 
-    # Freshness: max age of latest EOD in calendar days before STALE
+    # Freshness: max age of latest EOD in *trading* days before STALE
     max_data_age_days: int = int(os.getenv("MAX_DATA_AGE_DAYS", "3"))
+    # Phase 4 — holiday calendar + scheduled EOD
+    nse_holidays_file: str = os.getenv("NSE_HOLIDAYS_FILE", "").strip()
+    market_events_file: str = os.getenv("MARKET_EVENTS_FILE", "").strip()
+    eod_settle_hour_ist: int = int(os.getenv("EOD_SETTLE_HOUR_IST", "18"))
+    eod_settle_minute_ist: int = int(os.getenv("EOD_SETTLE_MINUTE_IST", "30"))
+    eod_ingest_schedule_enabled: bool = os.getenv(
+        "EOD_INGEST_SCHEDULE_ENABLED", "true"
+    ).lower() in ("1", "true", "yes")
+    eod_ingest_hour_ist: int = int(os.getenv("EOD_INGEST_HOUR_IST", "18"))
+    eod_ingest_minute_ist: int = int(os.getenv("EOD_INGEST_MINUTE_IST", "45"))
+    eod_ingest_poll_sec: int = int(os.getenv("EOD_INGEST_POLL_SEC", "60"))
 
     # Kotak EOD refresh size. 0 or negative = ALL NSE EQ cash names (~2.5k).
     # Browse/search always cover the full listed EQ universe; this only caps candle ingest.
@@ -64,14 +75,11 @@ class Config:
     # Parallel Kotak historical workers (hard-capped at 8 to avoid 429 storms)
     ingest_workers: int = min(8, max(1, int(os.getenv("INGEST_WORKERS", "4"))))
 
-    # Production / readiness (see docs/CTO_READINESS.md)
+    # Production / readiness (see docs/OPS.md, docs/CTO_READINESS.md)
     cors_origins: str = os.getenv("CORS_ORIGINS", "")
     api_key: str = os.getenv("API_KEY", "").strip()
-    allow_demo_data: bool = os.getenv("ALLOW_DEMO_DATA", "true").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+    # Phase 1: demo permanently disabled. Env ALLOW_DEMO_DATA is ignored if true.
+    allow_demo_data: bool = False
     enable_api_docs: bool = os.getenv("ENABLE_API_DOCS", "true").lower() in (
         "1",
         "true",
@@ -82,8 +90,8 @@ class Config:
         os.getenv("READY_MAX_DATA_AGE_DAYS", os.getenv("MAX_DATA_AGE_DAYS", "3"))
     )
 
-    # Customer platform auth (session tokens). Default on for MVP honesty.
-    auth_enabled: bool = os.getenv("AUTH_ENABLED", "true").lower() in (
+    # Personal desk default: auth OFF (single operator). SaaS login is opt-in.
+    auth_enabled: bool = os.getenv("AUTH_ENABLED", "false").lower() in (
         "1",
         "true",
         "yes",
@@ -92,8 +100,29 @@ class Config:
         "SECRET_KEY", "dev-only-change-me-swing-desk-32c"
     ).strip()
     session_ttl_hours: int = int(os.getenv("SESSION_TTL_HOURS", "72"))
-    # demo | future live adapters
-    market_data_adapter: str = os.getenv("MARKET_DATA_ADAPTER", "demo").strip().lower()
+    # Phase 7 — bind / exposure (start.sh exports BIND_HOST; uvicorn reads it)
+    bind_host: str = (
+        os.getenv("BIND_HOST", os.getenv("UVICORN_HOST", "127.0.0.1")).strip()
+        or "127.0.0.1"
+    )
+    # Explicit opt-in to listen on 0.0.0.0 / non-loopback while AUTH is off
+    allow_public_bind: bool = os.getenv("ALLOW_PUBLIC_BIND", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    # live only — demo/mock forbidden
+    market_data_adapter: str = os.getenv("MARKET_DATA_ADAPTER", "live").strip().lower()
+    # LTP older than this during regular hours → STALE + halt live calls
+    live_quote_stale_sec: float = _float("LIVE_QUOTE_STALE_SEC", 5.0)
+    # When Kotak WS has no quote: allow Yahoo 5m research FALLBACK (never broker LIVE).
+    # Set false to fail closed with UNAVAILABLE instead of Yahoo.
+    allow_yahoo_ltp_fallback: bool = os.getenv(
+        "ALLOW_YAHOO_LTP_FALLBACK", "true"
+    ).lower() in ("1", "true", "yes")
+    # Phase 3 — persistent 5m bars
+    bars_5m_retention_days: int = int(os.getenv("BARS_5M_RETENTION_DAYS", "45"))
+    bars_5m_yahoo_range: str = os.getenv("BARS_5M_YAHOO_RANGE", "5d").strip() or "5d"
     # Jurisdiction label shown in disclosures (not a compliance claim)
     jurisdiction_note: str = os.getenv(
         "JURISDICTION_NOTE",
@@ -101,14 +130,28 @@ class Config:
     )
 
     def cors_origin_list(self) -> list[str]:
+        """Phase 7: never default to ``*`` for auth-off personal desk."""
         raw = (self.cors_origins or "").strip()
-        if not raw:
-            return ["*"]  # local default
-        return [o.strip() for o in raw.split(",") if o.strip()]
+        if raw:
+            return [o.strip() for o in raw.split(",") if o.strip()]
+        # Local CRA (proxy + direct) — explicit localhost only
+        return [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
 
     def __post_init__(self):
         for dir_path in [self.data_dir, self.raw_dir, self.cache_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
+        # Phase 1: never allow demo adapter / demo data flag
+        object.__setattr__(self, "allow_demo_data", False)
+        if self.market_data_adapter in ("demo", "mock", "synthetic", "fake"):
+            raise RuntimeError(
+                f"MARKET_DATA_ADAPTER={self.market_data_adapter!r} forbidden. "
+                "Set MARKET_DATA_ADAPTER=live in backend/.env"
+            )
 
 
 config = Config()

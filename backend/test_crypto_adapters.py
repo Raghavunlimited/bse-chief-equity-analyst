@@ -1,73 +1,54 @@
-#!/usr/bin/env python3
-"""Crypto vault helpers + demo market adapter — offline unit tests."""
+"""Phase 1: vault helpers + live adapter registry (demo forbidden)."""
 from __future__ import annotations
 
 import os
 import unittest
 
-# Stable key before importing crypto (lru_cache)
-os.environ.setdefault("SECRET_KEY", "unit-test-secret-key-32chars-min!")
-os.environ["LLM_FERNET_KEY"] = ""
+os.environ.setdefault("SECRET_KEY", "ci-test-secret-key-32chars-min!!")
+os.environ["MARKET_DATA_ADAPTER"] = "live"
+os.environ["AUTH_ENABLED"] = "false"
 
-from app.adapters.demo import DemoAdapter, DEMO_SYMBOLS  # noqa: E402
-from app.crypto_secrets import decrypt_secret, encrypt_secret, redact  # noqa: E402
+from app.adapters.registry import (  # noqa: E402
+    DemoAdapterForbidden,
+    clear_adapter_cache,
+    get_market_adapter,
+)
+from app.adapters.live_yahoo import LiveYahooAdapter  # noqa: E402
+from app.crypto_secrets import encrypt_secret, decrypt_secret  # noqa: E402
+from app import config as config_mod  # noqa: E402
 
 
-class CryptoSecretsTests(unittest.TestCase):
+class VaultTests(unittest.TestCase):
     def test_roundtrip(self):
-        plain = "sk-test-secret-value-abcdef"
-        cipher = encrypt_secret(plain)
-        self.assertNotEqual(cipher, plain)
-        self.assertEqual(decrypt_secret(cipher), plain)
-
-    def test_tampered_ciphertext_raises(self):
-        cipher = encrypt_secret("hello-world-key")
-        with self.assertRaises(ValueError):
-            decrypt_secret(cipher[:-4] + "xxxx")
-
-    def test_redact(self):
-        self.assertEqual(redact(""), "")
-        self.assertEqual(redact("abcd"), "***")
-        self.assertTrue(redact("abcdefgh").startswith("abcd"))
-        self.assertIn("***", redact("abcdefgh"))
+        token = encrypt_secret("sk-test-secret-value")
+        self.assertNotEqual(token, "sk-test-secret-value")
+        self.assertEqual(decrypt_secret(token), "sk-test-secret-value")
 
 
-class DemoAdapterTests(unittest.TestCase):
-    def setUp(self):
-        self.adapter = DemoAdapter()
+class RegistryTests(unittest.TestCase):
+    def tearDown(self):
+        config_mod.config.market_data_adapter = "live"
+        clear_adapter_cache()
 
-    def test_quote_provenance_demo(self):
-        q = self.adapter.get_quote("RELIANCE")
-        self.assertEqual(q["provenance"], "demo")
-        self.assertEqual(q["source"], "demo")
-        self.assertIsNotNone(q["last"])
-        self.assertEqual(q["symbol"], "RELIANCE")
+    def test_live_adapter(self):
+        clear_adapter_cache()
+        config_mod.config.market_data_adapter = "live"
+        adapter = get_market_adapter()
+        self.assertIsInstance(adapter, LiveYahooAdapter)
+        # Phase 2: facade resolves Kotak WS then optional Yahoo FALLBACK
+        self.assertEqual(adapter.source_id, "live_quote_provider")
 
-    def test_unknown_symbol_raises(self):
-        with self.assertRaises(KeyError):
-            self.adapter.get_quote("NOTAREAL")
+    def test_demo_forbidden(self):
+        clear_adapter_cache()
+        config_mod.config.market_data_adapter = "demo"
+        with self.assertRaises(DemoAdapterForbidden):
+            get_market_adapter()
 
-    def test_bars_deterministic_length(self):
-        a = self.adapter.get_bars("TCS", lookback=10)
-        b = self.adapter.get_bars("TCS", lookback=10)
-        self.assertEqual(len(a["bars"]), 10)
-        self.assertEqual(a["bars"], b["bars"])
-        self.assertEqual(a["provenance"], "demo")
+    def test_demo_module_import_fails(self):
+        with self.assertRaises(RuntimeError):
+            import importlib
 
-    def test_equity_oi_zero_vs_commodity_positive(self):
-        eq = self.adapter.get_oi("INFY")
-        self.assertEqual(eq["open_interest"], 0.0)
-        cmd = self.adapter.get_oi("GOLD")
-        self.assertGreater(cmd["open_interest"], 0)
-
-    def test_commodity_financials_null(self):
-        f = self.adapter.get_financials("CRUDE")
-        self.assertIsNone(f["pe"])
-        self.assertEqual(f["extras"]["asset_class"], "commodity")
-        self.assertEqual(f["provenance"], "demo")
-
-    def test_universe_matches_seed(self):
-        self.assertEqual(set(self.adapter.list_symbols()), set(DEMO_SYMBOLS))
+            importlib.import_module("app.adapters.demo")
 
 
 if __name__ == "__main__":

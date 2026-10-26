@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { deskAPI } from '../services/api';
+import ExpectancyHonestyBanner from './ExpectancyHonestyBanner';
 import SignalBoard from './SignalBoard';
 
 export default function IntradayDesk({ onOpen, onAnalyze }) {
@@ -55,8 +56,8 @@ export default function IntradayDesk({ onOpen, onAnalyze }) {
         <div>
           <h3>Intraday tape</h3>
           <p className="section-sub">
-            Near-live NSE cash bias — consultant BUY/SELL/HOLD when available.
-            Risk 0.25–0.5% per idea. Research only.
+            NSE cash research bias — Kotak WS = broker LIVE; otherwise Yahoo 5m
+            FALLBACK (never labeled broker live). Risk 0.25–0.5% per idea.
           </p>
         </div>
         <div className="live-desk__controls">
@@ -80,7 +81,29 @@ export default function IntradayDesk({ onOpen, onAnalyze }) {
         </div>
       </div>
 
-      {data?.message && <p className="live-desk__msg">{data.message}</p>}
+      {data?.feed_health && (
+        <div
+          className={`banner ${
+            data.feed_health.broker_live
+              ? 'ok'
+              : data.live_calls_allowed
+                ? 'info'
+                : 'warn'
+          }`}
+          role="status"
+        >
+          <strong>
+            {data.feed_health.market_data_state ||
+              data.feed_health.feed_status ||
+              'FEED'}
+            {data.feed_health.broker_live ? ' · BROKER' : ' · RESEARCH'}
+          </strong>
+          <p>{data.feed_health.message || data.message}</p>
+        </div>
+      )}
+      {data?.message && !data?.feed_health && (
+        <p className="live-desk__msg">{data.message}</p>
+      )}
       {error && <p className="error-text">{String(error)}</p>}
 
       <div className="stat-grid compact live-desk__stats">
@@ -104,9 +127,16 @@ export default function IntradayDesk({ onOpen, onAnalyze }) {
         </div>
       </div>
 
+      <ExpectancyHonestyBanner
+        desk="intraday"
+        honesty={data?.expectancy_honesty}
+      />
+
       <SignalBoard
         signals={signals}
+        desk="intraday"
         source={data?._source}
+        availability={data?.signal_availability}
         loading={loading && !data}
         onOpen={onOpen}
         onAnalyze={onAnalyze}

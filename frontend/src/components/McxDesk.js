@@ -44,14 +44,15 @@ export default function McxDesk({ onAnalyze }) {
     <section className="section live-desk" id="section-mcx">
       <div className="section__head">
         <div>
-          <h3>MCX · Commodities</h3>
+          <h3>Commodities · global futures proxy</h3>
           <p className="section-sub">
-            Gold, Silver, Crude, NatGas, Copper — consultant BUY/SELL/HOLD when
-            available. Map to front-month MCX yourself. Leveraged; research only.
+            Yahoo continuous futures (usually USD) + USDINR context — not
+            exchange-listed MCX INR contracts. Related MCX names are unvalidated
+            hints. No lot sizing. Research only.
           </p>
         </div>
         <div className="live-desk__controls">
-          <span className="live-pill is-live">LIVE FUTURES</span>
+          <span className="live-pill is-proxy">GLOBAL PROXY</span>
           <label className="live-toggle">
             <input
               type="checkbox"
@@ -72,7 +73,9 @@ export default function McxDesk({ onAnalyze }) {
 
       <SignalBoard
         signals={signals}
+        desk="mcx"
         source={data?._source}
+        availability={data?.signal_availability}
         loading={loading && !data}
         onAnalyze={onAnalyze}
         currency={false}

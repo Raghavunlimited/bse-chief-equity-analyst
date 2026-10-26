@@ -49,57 +49,6 @@ _BASES = (
 HIST_PATH = "/market-data/1.0/historical/details"
 SCRIP_PATH = "/script-details/1.0/masterscrip/file-paths"
 
-# Well-known NSE cash tokens (fallback if scrip master fails)
-_KNOWN_TOKENS: Dict[str, str] = {
-    "RELIANCE": "2885",
-    "TCS": "11536",
-    "INFY": "1594",
-    "HDFCBANK": "1333",
-    "ICICIBANK": "4963",
-    "SBIN": "3045",
-    "ITC": "1660",
-    "BHARTIARTL": "10604",
-    "LT": "11483",
-    "AXISBANK": "5900",
-    "KOTAKBANK": "1922",
-    "ASIANPAINT": "236",
-    "MARUTI": "10999",
-    "SUNPHARMA": "3351",
-    "TITAN": "3506",
-    "BAJFINANCE": "317",
-    "WIPRO": "3787",
-    "HCLTECH": "7229",
-    "ONGC": "2475",
-    "NTPC": "11630",
-    "POWERGRID": "14977",
-    "TATAMOTORS": "3456",
-    "TATASTEEL": "3499",
-    "JSWSTEEL": "11723",
-    "HINDUNILVR": "1394",
-    "ULTRACEMCO": "11532",
-    "NESTLEIND": "17963",
-    "TECHM": "13538",
-    "ADANIENT": "25",
-    "ADANIPORTS": "15083",
-    "COALINDIA": "2031",
-    "BPCL": "526",
-    "INDUSINDBK": "5258",
-    "BAJAJFINSV": "16675",
-    "M&M": "2031",
-    "DRREDDY": "881",
-    "CIPLA": "694",
-    "EICHERMOT": "910",
-    "GRASIM": "1232",
-    "HINDALCO": "1363",
-    "APOLLOHOSP": "157",
-    "DIVISLAB": "10940",
-    "BRITANNIA": "547",
-    "HEROMOTOCO": "1348",
-    "SBILIFE": "21808",
-    "HDFCLIFE": "467",
-}
-
-
 def reload_env() -> None:
     load_dotenv(_ENV_PATH, override=True)
 
@@ -257,23 +206,35 @@ def _warm_token_cache() -> None:
         if len(_token_cache) > 100:
             return
         try:
-            from app.universe_nse import nse_eq_token_map
+            from app.kotak.scrip_master import get_scrip_master
 
-            _token_cache.update(nse_eq_token_map())
+            _token_cache.update(get_scrip_master().nse_eq_token_map())
         except Exception as e:
-            logger.warning("token map warm failed: %s", e)
-        _token_cache.update(_KNOWN_TOKENS)
+            logger.warning("token map warm via scrip_master failed: %s", e)
+            try:
+                from app.universe_nse import nse_eq_token_map
+
+                _token_cache.update(nse_eq_token_map())
+            except Exception as e2:
+                logger.warning("token map warm failed: %s", e2)
 
 
 def resolve_token(symbol: str) -> Optional[str]:
-    """Map trading symbol → NSE instrument token string."""
-    sym = symbol.upper().strip()
+    """Map trading symbol → NSE instrument token string (from scrip master only)."""
+    sym = symbol.upper().strip().replace(".NS", "").replace("-EQ", "")
     with _token_lock:
         if sym in _token_cache:
             return _token_cache[sym]
-        if sym in _KNOWN_TOKENS:
-            _token_cache[sym] = _KNOWN_TOKENS[sym]
-            return _KNOWN_TOKENS[sym]
+    try:
+        from app.kotak.scrip_master import get_scrip_master
+
+        inst = get_scrip_master().resolve_equity(sym, exchange_segment="nse_cm")
+        token = inst.instrument_token
+        with _token_lock:
+            _token_cache[sym] = token
+        return token
+    except Exception as e:
+        logger.warning("scrip_master resolve failed for %s: %s — falling back to CSV", sym, e)
 
     df = _load_nse_cm_scrip()
     if df.empty:

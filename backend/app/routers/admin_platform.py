@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 Direction = Literal["buy", "sell", "none"]
 Category = Literal["intraday", "swing", "commodity"]
-DataMode = Literal["live", "delayed", "stale", "demo"]
+DataMode = Literal["live", "delayed", "stale"]
 Status = Literal["draft", "published", "expired", "revised"]
 
 
@@ -40,7 +40,7 @@ class PublishSignalBody(BaseModel):
         max_length=2000,
     )
     methodology_id: str = Field(default="baseline_v1", max_length=64)
-    data_mode: DataMode = "demo"
+    data_mode: DataMode = "delayed"
     expires_in_hours: Optional[int] = Field(None, ge=1, le=24 * 30)
     status: Status = "published"
     instrument_id: Optional[str] = None
