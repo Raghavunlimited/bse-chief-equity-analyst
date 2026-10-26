@@ -1,9 +1,10 @@
 # Desk Upgrade Tracker
 
 **Repository:** `bse-chief-equity-analyst`  
-**App version string (code):** `5.12.0-strategy-eval` (`backend/app/main.py`)  
+**App version string (code):** `5.12.4-api-key-evaluate` (`backend/app/main.py`)  
+**Git HEAD:** `86fd559` on `main` (clean vs `origin/main` except audit doc edits this pass)  
 **Audit date:** 2026-10-26  
-**Current upgrade phase:** **FINAL AUDIT** — see `FINAL_REVERSE_ENGINEERING_AUDIT.md`; remediations proceed one approved batch at a time  
+**Current upgrade phase:** **FINAL AUDIT (post-remediation) COMPLETE** — see `FINAL_REVERSE_ENGINEERING_AUDIT.md`; **STOP — no further fixes this pass**  
 **Release readiness claim:** **Not production-ready for public/multi-user hosting** — personal/local research desk only (`security.production_ready_claim: false`)  
 
 ---
@@ -896,4 +897,75 @@ TOTAL_TESTS=216 FAIL_MODULES=0
 Acceptance for AUDIT-P0-002: **PASSED** (backend CI-equivalent green locally).  
 Frontend CI job / remote `gh` Actions run: **not executed this batch** — not claimed green remotely.
 
-**STOP after batch 2 — await review before next backlog item.**
+---
+
+### Remediation batch 3 — AUDIT-P0-LEDGER-001 **DONE**
+
+**Issue:** Empty Signal ledger looked like a broken strategy; demo rows could confuse.  
+**Fix:** `signal_availability` honesty codes; strip `data_mode=demo` from platform list; UI empty-state explanation; `seed_platform.py` REFUSED.  
+**Evidence:** `test_signal_availability` (15 OK); SignalHistory / SignalBoard UI tests.
+
+---
+
+### Remediation batch 4 — AUDIT-P1-003 **DONE**
+
+**Issue:** Index/Intraday expectancy honesty not visible enough.  
+**Fix:** `ExpectancyHonestyBanner` on Index + Intraday desks; SignalBoard gate-strip behavior.  
+**Evidence:** Jest desk/banner suites; `GATE_PASS_RESEARCH` / no `EDGE_PROVEN` reattach.
+
+---
+
+### Remediation batch 5 — AUDIT-P1-004 **DONE**
+
+**Issue:** NSE holiday feed could read as current when operator `as_of` aged.  
+**Fix:** `is_current` / `presented_as_current`; UI “STALE — not current”; **`as_of` left at `2026-01-15`** (no fake refresh).  
+**Evidence:** `test_market_events` (13 OK) + MarketEventsCalendar Jest.
+
+---
+
+### Remediation batch 6 — AUDIT-P1-005 **DONE**
+
+**Issue:** Strategy evaluate / GET harness not under API_KEY when set.  
+**Fix:** Middleware gates POST evaluate + GET `run_harness=true`; empty key keeps local UI usable.  
+**Version:** `5.12.4-api-key-evaluate`.  
+**Evidence:** `test_strategy_evaluation` (11 OK).
+
+---
+
+## Post-remediation final audit — 2026-10-26 (this session)
+
+**Commands / results (verify, not tracker claims):**
+
+```text
+# Backend CI-eq + test_signal_availability
+TOTAL_TESTS=234  FAIL_MODULES=0
+
+# Frontend
+CI=true npm test -- --watchAll=false  → 14 suites / 36 tests PASS
+npm run build                         → OK (~249.8 kB gzip main)
+
+# Spotchecks
+freeze STALE BUY→HOLD; annotate stale BUY→HOLD; holiday as_of=2026-01-15;
+posture production_ready_claim=false; no secret values in posture → SPOTCHECKS_OK
+```
+
+| Area | Status |
+|------|--------|
+| Market-data truth / freeze | **PARTIAL** (unit VERIFIED; live Kotak E2E **BLOCKED**) |
+| Expectancy / GATE_PASS_RESEARCH | **PARTIAL** (unit VERIFIED; no EDGE_PROVEN) |
+| Signal availability / ledger | **PARTIAL** (honesty VERIFIED; ledger empty by design) |
+| Holiday freshness labeling | **PARTIAL** (stale labeling VERIFIED; feed as_of aged) |
+| API_KEY evaluate gate | **PARTIAL** (VERIFIED when key set; open when empty) |
+| LLM server-snapshot explain | **NOT IMPLEMENTED** |
+| Broker order execution | **NOT IMPLEMENTED** (correct) |
+| Credentialed Kotak live e2e | **BLOCKED** |
+
+**Mocks vs live:** All green results above = unittest/Jest/fixtures/TestClient. Live Yahoo/Kotak E2E not claimed.
+
+**CI gap:** `test_signal_availability.py` still omitted from `.github/workflows/ci.yml` (local green).
+
+**Uncommitted after this audit write:** `FINAL_REVERSE_ENGINEERING_AUDIT.md`, `DESK_UPGRADE_TRACKER.md` only (doc updates).
+
+**Backlog (not started):** AUDIT-P0-LEDGER-002 (destructive demo delete — needs explicit OK); AUDIT-P2 live harness; optional LLM server-snapshot design; CI add `test_signal_availability`.
+
+**STOP — final audit complete; no product fixes this pass.**
