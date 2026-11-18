@@ -835,7 +835,7 @@ npm run build                          → OK
 
 ## Final reverse-engineering audit — 2026-10-26
 
-Full matrix, baseline commands, and backlog: [`FINAL_REVERSE_ENGINEERING_AUDIT.md`](FINAL_REVERSE_ENGINEERING_AUDIT.md).
+Full matrix, baseline commands, and backlog: [`archive/FINAL_REVERSE_ENGINEERING_AUDIT.md`](archive/FINAL_REVERSE_ENGINEERING_AUDIT.md).
 
 ### Baseline (this session, before remediations)
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fpdf import FPDF
 
-OUT = Path(__file__).resolve().parents[2] / "Swing_Desk_User_Guide.pdf"
+OUT = Path(__file__).resolve().parents[2] / "docs" / "guides" / "Swing_Desk_User_Guide.pdf"
 
 TEXT = """Swing Desk User Guide v3.4 (Research only - not investment advice)
 

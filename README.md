@@ -2,7 +2,9 @@
 
 Personal **research-only** multi-desk (Swing · Intraday · Index · Commodities proxy) for NSE cash / index work. Live Kotak EOD + optional Kotak WebSocket LTP; Yahoo as explicit research fallback. **No order execution.**
 
-Canonical guide: [`docs/PERSONAL_USE.md`](docs/PERSONAL_USE.md) · Ops / backup: [`docs/OPS.md`](docs/OPS.md) · Upgrade tracker: [`DESK_UPGRADE_TRACKER.md`](DESK_UPGRADE_TRACKER.md)
+Canonical guide: [`docs/PERSONAL_USE.md`](docs/PERSONAL_USE.md) · Ops / backup: [`docs/OPS.md`](docs/OPS.md) · Upgrade tracker: [`docs/DESK_UPGRADE_TRACKER.md`](docs/DESK_UPGRADE_TRACKER.md)
+
+Swing Desk is my personal project, built on my own time for my own trading research. It has no other users and is not built for an employer or a client.
 
 This build targets a **single-operator local machine** (`AUTH_ENABLED=false`, loopback bind). It is **not** claimed production-ready for public or multi-user hosting.
 

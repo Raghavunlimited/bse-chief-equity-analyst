@@ -1,4 +1,4 @@
-# Consultant voice — client-facing calls
+# Consultant voice — how calls are worded
 
 How Swing, Intraday, and Commodity desks should word research calls.  
 Tone: professional, calm, risk first. No hype. No guarantees.
@@ -14,7 +14,7 @@ Tone: professional, calm, risk first. No hype. No guarantees.
 
 ## Side vocabulary
 
-| Side | Meaning for clients |
+| Side | Meaning |
 |------|---------------------|
 | **BUY** | Constructive bias with a defined plan (entry zone, stop, targets). Not “all-in”. |
 | **SELL** | Bearish / short bias (intraday or commodity). Swing desk rarely uses SELL for new shorts. |
@@ -51,7 +51,7 @@ Prefer “BUY bias” / “SELL bias” / “stand down” over “hot tip” or
 
 ### MCX / commodities
 
-- Always mention **proxy vs MCX**: global futures as directional research; client maps lot, margin, expiry.
+- Always mention **proxy vs MCX**: global futures as directional research; map lot, margin, expiry yourself.
 - Always **HIGH_LEVERAGE** — gaps and margin calls can exceed cash-style risk.
 - Energy: extra gap caution. USDINR: context, not a forced leveraged bet.
 
@@ -88,4 +88,4 @@ Keep bullets short. Prefer “no clear edge” over inventing a trade.
 > Research / education only. Not investment advice. Not a profit guarantee.  
 > Past patterns do not ensure future results. Capital at risk.
 
-Client copy may shorten this, but must not remove the “not advice / capital at risk” intent.
+UI copy may shorten this, but must not remove the “not advice / capital at risk” intent.

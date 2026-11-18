@@ -1,4 +1,4 @@
-# Customer-facing disclosures
+# Disclosures shown in the UI
 
 Swing Desk provides **research-style analysis and potential signals** for informational and educational purposes only.
 
@@ -11,7 +11,7 @@ Swing Desk provides **research-style analysis and potential signals** for inform
 
 ## Jurisdiction
 
-`JURISDICTION_NOTE` (environment) is shown to customers. Default:
+`JURISDICTION_NOTE` (environment) is shown in the UI. Default:
 
 > Research tooling only. Not registered investment advice in any jurisdiction.
 

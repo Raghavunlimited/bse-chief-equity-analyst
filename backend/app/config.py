@@ -75,7 +75,7 @@ class Config:
     # Parallel Kotak historical workers (hard-capped at 8 to avoid 429 storms)
     ingest_workers: int = min(8, max(1, int(os.getenv("INGEST_WORKERS", "4"))))
 
-    # Production / readiness (see docs/OPS.md, docs/CTO_READINESS.md)
+    # Production / readiness (see docs/OPS.md, docs/archive/CTO_READINESS.md)
     cors_origins: str = os.getenv("CORS_ORIGINS", "")
     api_key: str = os.getenv("API_KEY", "").strip()
     # Phase 1: demo permanently disabled. Env ALLOW_DEMO_DATA is ignored if true.
